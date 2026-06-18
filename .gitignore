@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Virtual environment
+.venv/
+venv/
+
+# Environment variables
+.env
+
+# Data
+data/raw/
+data/interim/
+data/outputs/
+qdrant_storage/
+
+# Model checkpoints
+checkpoints/
+models/
+*.pt
+*.pth
+*.safetensors
+*.bin
+*.gguf
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
