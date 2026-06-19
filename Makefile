@@ -3,6 +3,9 @@
 setup:
 	pip install -r requirements.txt
 
+check-data:
+	bash scripts/check_data.sh
+
 qdrant-up:
 	docker compose up -d
 

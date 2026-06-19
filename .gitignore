@@ -1,14 +1,20 @@
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Virtual environment
 .venv/
 venv/
+env/
 
 # Environment variables
 .env
+.env.*
+!.env.example
 
 # Data
 data/raw/
@@ -16,7 +22,12 @@ data/interim/
 data/outputs/
 qdrant_storage/
 
-# Model checkpoints
+# Keep empty folders if needed
+!data/
+!data/processed/
+!data/processed/.gitkeep
+
+# Model checkpoints / weights
 checkpoints/
 models/
 *.pt
@@ -24,9 +35,22 @@ models/
 *.safetensors
 *.bin
 *.gguf
+*.ckpt
+
+# HuggingFace / cache
+.cache/
+hf_cache/
+wandb/
+runs/
+logs/
 
 # Notebook checkpoints
 .ipynb_checkpoints/
 
-# OS
+# Streamlit
+.streamlit/secrets.toml
+
+# OS / editor
 .DS_Store
+.vscode/
+.idea/

@@ -4,8 +4,18 @@ project:
 
 data:
   law_path: data/raw/law_db/vlsp2025_law_new.json
-  train_path: data/raw/train/vlsp_2025_train.json
-  image_dir: data/raw/train/train_images
+  law_image_dir: data/raw/law_db/images.fld
+
+  train_path: data/raw/train_data/vlsp_2025_train.json
+  train_image_dir: data/raw/train_data/train_images
+
+  public_test_task1_path: data/raw/public_test/vlsp_2025_public_test_task1.json
+  public_test_task2_path: data/raw/public_test/vlsp_2025_public_test_task2.json
+  public_test_image_dir: data/raw/public_test/public_test_images
+
+  private_test_dir: data/raw/private_test
+  private_test_image_dir: data/raw/private_test/private_test_images
+
   processed_law_path: data/processed/law_articles.jsonl
   train_split_path: data/processed/train_split.jsonl
   val_split_path: data/processed/val_split.jsonl
