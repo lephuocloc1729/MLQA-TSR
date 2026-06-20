@@ -22,4 +22,10 @@ This project builds a retrieval-augmented Vision-Language Model system for answe
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+```
 
+## Project Planning
+
+The team execution schedule, issue breakdown, file ownership, reference map,
+and pull request order are documented in
+[`docs/4-week-execution-plan.md`](docs/4-week-execution-plan.md).
