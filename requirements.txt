@@ -1,19 +1,36 @@
-python-dotenv
-pyyaml
-tqdm
-pandas
-numpy
-pillow
-opencv-python
-matplotlib
-streamlit
-qdrant-client
-sentence-transformers
-transformers
-accelerate
-torch
-torchvision
-peft
-bitsandbytes
-scikit-learn
-pytest
+# Reproducible environment tested with Python 3.11.8.
+# Update related ML packages together, especially torch/torchvision and
+# transformers/peft/accelerate.
+
+# Configuration and schemas
+python-dotenv==1.2.2
+PyYAML==6.0.3
+pydantic==2.13.4
+tqdm==4.68.3
+
+# Data processing and visualization
+numpy==2.4.6
+pandas==3.0.3
+Pillow==12.2.0
+opencv-python==4.13.0.92
+matplotlib==3.11.0
+scikit-learn==1.9.0
+
+# Retrieval and demo
+qdrant-client==1.18.0
+streamlit==1.58.0
+
+# VLM, embeddings, and PEFT
+torch==2.12.1
+torchvision==0.27.1
+transformers==5.12.1
+sentence-transformers==5.6.0
+accelerate==1.14.0
+peft==0.19.1
+
+# QLoRA training is intended for the Linux CUDA environment. The application,
+# retrieval pipeline, and tests remain installable on macOS without it.
+bitsandbytes==0.49.2; platform_system == "Linux" and platform_machine == "x86_64"
+
+# Tests
+pytest==9.1.0
