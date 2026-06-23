@@ -3,12 +3,29 @@ description: Create a scoped implementation, experiment, or documentation task
 title: "[W?-??] "
 labels: []
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template with the issue bodies in `docs/week1-issues.md` and
+        `docs/4-week-execution-plan.md`. Keep each issue scoped to one PR.
+        Do not commit raw VLSP data, secrets, model weights, embeddings,
+        Qdrant storage, or local caches.
+
   - type: input
     id: plan_key
     attributes:
       label: Plan key
       description: Stable key from docs/4-week-execution-plan.md, such as W2-03.
-      placeholder: W2-03
+      placeholder: W1-04
+    validations:
+      required: true
+
+  - type: input
+    id: milestone_labels
+    attributes:
+      label: Milestone and labels
+      description: Add these manually in GitHub after creating the issue.
+      placeholder: "Milestone: W1 - Trusted baseline; labels: week-1, P0, retrieval"
     validations:
       required: true
 
@@ -35,11 +52,31 @@ body:
     validations:
       required: true
 
+  - type: input
+    id: branch
+    attributes:
+      label: Branch
+      description: Use the branch name suggested in the plan.
+      placeholder: feat/w1-04-qdrant-text-retrieval
+    validations:
+      required: true
+
+  - type: input
+    id: pr_title
+    attributes:
+      label: Pull request title
+      placeholder: "feat(retrieval): index LawDB articles with Qdrant text search"
+    validations:
+      required: true
+
   - type: textarea
     id: objective
     attributes:
       label: Objective
       description: Describe one observable outcome, not a list of technologies.
+      placeholder: |
+        Implement the Tier A text retrieval component: embed the question plus
+        choices, query Qdrant, and return top-k legal article evidence.
     validations:
       required: true
 
@@ -60,15 +97,40 @@ body:
       label: Reference files
       description: List exact files in either reference project and what to learn from each.
       placeholder: |
-        - ../LexiSignVQA-main/src/core/lawdb/preprocess_lawdb_infos.py: article traversal
+        - ../LexiSignVQA-main/src/deps/qdrant.py: small vector-store wrapper shape
+        - ../a-low-cost-approach-to-MLQA-TSR-main-2/src/db/qdrant.py: named vector configuration idea
     validations:
       required: false
+
+  - type: textarea
+    id: implementation_notes
+    attributes:
+      label: Implementation notes
+      description: Mention scope boundaries, interfaces, and things not to implement in this issue.
+      placeholder: |
+        - Keep this issue text-only; do not add image retrieval or sign crop.
+        - Return retrieved items as src.schemas.Evidence.
+        - Use fake embeddings/vector store in unit tests.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_output
+    attributes:
+      label: Expected output
+      description: Describe concrete files, commands, artifacts, or response shape produced by this issue.
+      placeholder: |
+        - python -m src.retrieval --mode index creates/recreates the Qdrant collection.
+        - python -m src.retrieval --mode retrieve --sample-id train_1 prints top-k evidence.
+        - Results are serializable as src.schemas.Evidence.
+    validations:
+      required: true
 
   - type: textarea
     id: dependencies
     attributes:
       label: Dependencies and blockers
-      placeholder: Depends on W1-02; needs CUDA GPU for the full run.
+      placeholder: Depends on W1-02. Blocks W1-06 and W1-07.
     validations:
       required: false
 
@@ -80,6 +142,19 @@ body:
       placeholder: |
         - [ ] Output contains exactly 402 articles.
         - [ ] Unit tests pass without raw data in CI.
+    validations:
+      required: true
+
+  - type: textarea
+    id: test_plan
+    attributes:
+      label: Test plan
+      description: List unit/integration/manual tests required before review.
+      placeholder: |
+        - Unit test query text construction for Multiple choice and Yes/No.
+        - Unit test deduplication and rank ordering.
+        - Unit test payload conversion into Evidence.
+        - Manual smoke test with train_1 after Qdrant is running.
     validations:
       required: true
 
@@ -99,6 +174,8 @@ body:
       label: Data and experiment safety
       options:
         - label: I will not commit raw VLSP data, secrets, model weights, or local caches.
+          required: true
+        - label: I will not commit generated embeddings, Qdrant storage, or bulky experiment artifacts.
           required: true
         - label: I will not use validation samples as training data or few-shot examples.
           required: true
