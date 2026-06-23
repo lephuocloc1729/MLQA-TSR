@@ -17,8 +17,9 @@ Vietnamese traffic images and the two VLSP 2025 legal documents. It must:
 - return a structured answer with valid `law_id` and `article_id` citations;
 - provide a CLI benchmark and a Streamlit demonstration.
 
-Traffic-sign detection, OCR, Qdrant, and production monitoring are stretch
-goals unless all required acceptance gates are already green.
+Traffic-sign detection, OCR, advanced image retrieval, and production
+monitoring are stretch goals unless all required acceptance gates are already
+green. Qdrant-backed text retrieval is part of the core Tier A pipeline.
 
 ## 2. Team Roles and File Ownership
 
@@ -104,6 +105,10 @@ Issue keys such as `W1-01` are stable planning IDs. After creating an issue,
 put its GitHub number beside the key in this document.
 
 ## 5. Week 1: Trusted Baseline
+
+Detailed GitHub-ready issue bodies for this week are in
+[`docs/week1-issues.md`](week1-issues.md). Use that file as the source of truth
+when creating the actual week-1 issues.
 
 ### W1-01 - Reproducible environment and CI
 
@@ -201,8 +206,9 @@ put its GitHub number beside the key in this document.
 
 - **Owner/reviewer:** M2/M1; **priority:** P0; **depends on:** W2-01;
   **days:** Wed-Thu.
-- **Change:** `src/retrieval.py`, new `tests/test_retrieval.py`; optionally add
-  a Qdrant adapter without making Docker mandatory.
+- **Change:** `src/retrieval.py`, new `tests/test_retrieval.py`; reuse the
+  week-1 Qdrant text adapter and mock the vector store in CI so Docker is not
+  mandatory for tests.
 - **Reference:** low-cost `src/db/qdrant.py`, `notebooks/index_qdrant.ipynb`,
   and `notebooks/naive_vector_search.ipynb`.
 - **Acceptance:** text-only, image-only, and weighted multimodal search; query
@@ -494,7 +500,8 @@ needed.
 
 If the schedule slips, cut in this order:
 
-1. Qdrant backend; keep the in-memory index.
+1. Qdrant tuning, persistence, and deployment extras; keep the simple text
+   retrieval path working.
 2. Object detection and cropped-sign retrieval.
 3. Extra embedding models beyond one text and one image model.
 4. Advanced UI styling.
