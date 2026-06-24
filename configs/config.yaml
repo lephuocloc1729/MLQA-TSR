@@ -27,6 +27,8 @@ qdrant:
 
 retrieval:
   top_k: 5
+  embedding_model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+  batch_size: 64
   text_weight: 0.7
   image_weight: 0.3
 
