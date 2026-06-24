@@ -41,5 +41,9 @@ model:
   temperature: 0.0
   max_new_tokens: 512
 
+prompt:
+  image_placeholder: <IMAGE>
+  max_evidence_chars: 1200
+
 output:
   dir: data/outputs
