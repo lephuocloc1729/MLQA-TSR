@@ -1,7 +1,27 @@
-.PHONY: setup qdrant-up qdrant-down preprocess index task1 task2 eval demo test clean
+.PHONY: help setup check-data qdrant-up qdrant-down preprocess index retrieve task1 task2 assistant eval demo ci-test test verify clean
+
+help:
+	@echo "Traffic Legal VLM - common commands"
+	@echo ""
+	@echo "Setup:"
+	@echo "  make setup       Install pinned Python dependencies"
+	@echo "  make check-data  Check expected raw VLSP data paths"
+	@echo "  make ci-test     Run lightweight schema tests used by CI"
+	@echo "  make test        Run local unit tests with the macOS readline workaround"
+	@echo ""
+	@echo "Services:"
+	@echo "  make qdrant-up   Start Qdrant with docker compose"
+	@echo "  make qdrant-down Stop Qdrant"
+	@echo ""
+	@echo "Pipeline placeholders:"
+	@echo "  make preprocess  Build processed LawDB articles"
+	@echo "  make index       Build the retrieval index"
+	@echo "  make eval        Evaluate saved predictions"
+	@echo "  make demo        Start the Streamlit demo"
 
 setup:
-	pip install -r requirements.txt
+	python -m pip install --upgrade pip
+	python -m pip install -r requirements.txt
 
 check-data:
 	bash scripts/check_data.sh
@@ -36,8 +56,15 @@ eval:
 demo:
 	streamlit run app/streamlit_app.py
 
+ci-test:
+	python -c 'import sys, types; sys.modules.setdefault("readline", types.ModuleType("readline")); import pytest; raise SystemExit(pytest.main(["-q", "tests/test_schemas.py"], plugins=[]))'
+
 test:
-	pytest tests/
+	python -c 'import sys, types; sys.modules.setdefault("readline", types.ModuleType("readline")); import pytest; raise SystemExit(pytest.main(["-q", "tests"], plugins=[]))'
+
+verify: ci-test
+	python -m pip check
+	git diff --check
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +

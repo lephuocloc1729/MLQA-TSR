@@ -59,7 +59,8 @@ their assumptions and licenses.
 - `../a-low-cost-approach-to-MLQA-TSR-main-2/src/nn/object_detection.py`: object
   crop experiment; do not make it mandatory in week 1 or 2.
 - `../a-low-cost-approach-to-MLQA-TSR-main-2/src/db/qdrant.py`: named vector
-  design; prefer an in-memory index for the first implementation.
+  design; week 1 uses a simple Qdrant text collection while CI keeps vector
+  store tests mocked.
 - `../a-low-cost-approach-to-MLQA-TSR-main-2/notebooks/index_qdrant.ipynb`:
   indexing training examples and payload design.
 - `../a-low-cost-approach-to-MLQA-TSR-main-2/notebooks/naive_vector_search.ipynb`:
@@ -149,44 +150,63 @@ when creating the actual week-1 issues.
 - **PR:** `feat/w1-03-grouped-split`, title
   `feat(data): add grouped train validation split`.
 
-### W1-04 - Metrics and experiment output contract
+### W1-04 - Qdrant text retrieval for legal articles
 
-- **Owner/reviewer:** M4/M3; **priority:** P0; **days:** Tue-Thu.
-- **Change:** `src/evaluate.py`, new `tests/test_evaluate.py`,
-  `docs/experiments.md`.
+- **Owner/reviewer:** M2/M1; **priority:** P0; **depends on:** W1-02;
+  **days:** Wed-Fri.
+- **Change:** `src/retrieval.py`, `configs/config.yaml`, `scripts/index.sh`,
+  new `tests/test_retrieval.py`.
+- **Reference:** LexiSign `src/deps/qdrant.py`; low-cost `src/db/qdrant.py`
+  and `src/nn/text_embedding.py`.
+- **Acceptance:** index LawDB articles into one Qdrant text collection; query
+  from question and choices; return top-k unique `Evidence` with rank, score,
+  and citation IDs; CI tests use fake embeddings/vector store.
+- **PR:** `feat/w1-04-qdrant-text-retrieval`, title
+  `feat(retrieval): index LawDB articles with Qdrant text search`.
+
+### W1-05 - Evaluation metrics and result artifact contract
+
+- **Owner/reviewer:** M4/M3; **priority:** P0; **depends on:** W1-03;
+  **days:** Tue-Thu.
+- **Change:** `src/evaluate.py`, `docs/experiments.md`, new
+  `tests/test_evaluate.py`.
 - **Reference:** LexiSign `src/eval/sub_task_1.py` and
   `src/eval/sub_task_2.py`.
-- **Acceptance:** tested per-sample macro Precision/Recall/F2, overall and
-  per-type Accuracy, invalid prediction count, JSON result artifact containing
-  config name, seed, split hash, latency, and metrics.
-- **PR:** `feat/w1-04-evaluation`, title
+- **Acceptance:** tested macro Precision/Recall/F2 for retrieval, overall and
+  per-type Accuracy for QA, invalid prediction count, and JSON artifacts with
+  config, seed, split path/hash, latency, metrics, and failed IDs.
+- **PR:** `feat/w1-05-evaluation-metrics`, title
   `feat(eval): implement retrieval and QA metrics`.
 
-### W1-05 - Zero-shot VLM baseline B1
+### W1-06 - Structured prompting and VLM output parser
 
-- **Owner/reviewer:** M3/M2; **priority:** P0; **depends on:** W1-03, W1-04;
+- **Owner/reviewer:** M3/M2; **priority:** P0; **depends on:** W1-02, W1-04;
   **days:** Thu-Sat.
 - **Change:** `src/prompts.py`, `src/vlm.py`, `configs/config.yaml`, new
   `tests/test_vlm_output.py`.
-- **Reference:** LexiSign `src/core/sub_task_2.py` and
-  `src/prompts/answer_prompt.py`; low-cost `notebooks/vlm_answer.ipynb`.
-- **Acceptance:** handles both question types; temperature is zero; output is
-  parsed into a validated answer schema; a small offline parser test does not
-  require model weights; B0 and B1 validation artifacts are saved.
-- **PR:** `feat/w1-05-zero-shot`, title
-  `feat(vlm): add zero-shot QA baseline`.
+- **Reference:** LexiSign `src/prompts/answer_prompt.py` and
+  `src/core/sub_task_2.py`; low-cost `notebooks/vlm_answer.ipynb`.
+- **Acceptance:** prompt includes image, question, choices, and retrieved legal
+  evidence; parser converts JSON responses into `Prediction`; hallucinated
+  citations outside retrieved `Evidence` are rejected without model weights in
+  tests.
+- **PR:** `feat/w1-06-vlm-parser`, title
+  `feat(vlm): add structured legal QA prompt and parser`.
 
-### W1-06 - Week 1 integration and report
+### W1-07 - Text-RAG pipeline smoke run and weekly report
 
-- **Owner/reviewer:** M4/M3; **priority:** P0; **depends on:** W1-01..W1-05;
+- **Owner/reviewer:** M4/M3; **priority:** P0; **depends on:** W1-01..W1-06;
   **day:** Sun.
-- **Change:** `src/pipeline.py`, `Makefile`, `README.md`, `docs/report.md`.
-- **Reference:** LexiSign `src/core/sub_task_1.py` for orchestration style.
-- **Acceptance:** `make preprocess`, `make test`, and one documented baseline
-  command work; weekly report contains dataset audit, B0/B1, blockers, next
-  week, and contribution per member; tag release `w1-baseline`.
-- **PR:** `release/w1-baseline`, title
-  `release: integrate trusted week 1 baseline`.
+- **Change:** `src/pipeline.py`, `scripts/preprocess.sh`, `scripts/index.sh`,
+  `scripts/evaluate.sh`, `Makefile`, `README.md`, `docs/report.md`,
+  `docs/experiments.md`, optional placeholder in `app/streamlit_app.py`.
+- **Reference:** LexiSign `src/core/sub_task_1.py`,
+  `src/core/sub_task_2.py`, and `src/ui/inspect_subtask1.py`.
+- **Acceptance:** a five-sample smoke run produces `PipelineResult`-compatible
+  records; `make eval` evaluates the smoke output; weekly report records
+  completed issues, dataset audit, current metrics, blockers, and next steps.
+- **PR:** `release/w1-trusted-baseline`, title
+  `release: integrate week 1 trusted baseline`.
 
 ## 6. Week 2: Retrieval and Few-Shot
 
@@ -432,8 +452,12 @@ when creating the actual week-1 issues.
 ## 9. PR Order and Parallel Work
 
 ```text
-W1-01 -> W1-02 -> W1-03 -> W1-05 -> W1-06
-             \-> W1-04 -----/
+W1-01
+  -> W1-02 -> W1-03
+          \-> W1-04
+W1-03 --------> W1-05
+W1-04 --------> W1-06
+W1-01..W1-06 -> W1-07
 
 W2-01 -> W2-02 -> W2-03 -----> W2-06
                  \-> W2-04 -> W2-05 -/
@@ -448,9 +472,11 @@ W4-04 ---------------> W4-06
 W4-05 --------------/
 ```
 
-M1 and M4 can work in parallel on W1-02 and W1-04 after W1-01. M2 may prepare
-W2-01 behind an interface, but must rebase after W1-03. M3 must not run final
-baseline experiments before the split and metric PRs merge.
+M1 starts W1-02 and then W1-03. M2 can prepare the retrieval interface while
+waiting for W1-02, then owns W1-04. M3 starts W1-06 with fake evidence and
+connects it to real retrieval after W1-04. M4 starts W1-01 and W1-05, then
+owns W1-07 integration. M3 must not run final baseline experiments before the
+split and metric PRs merge.
 
 ## 10. Branch and Pull Request Rules
 
@@ -470,12 +496,14 @@ baseline experiments before the split and metric PRs merge.
 Required checks before merge:
 
 ```bash
-python -m pytest -q
-python -m src.data_utils --mode validate
-python -m src.evaluate --help
+make ci-test
+python -m pip check
+git diff --check
 ```
 
-Add formatting/lint commands in W1-01 after the team selects and pins the tool.
+Add broader checks such as `python -m src.data_utils --mode validate` and
+`python -m src.evaluate --help` after the corresponding week-1 issues implement
+those commands.
 
 ## 11. Weekly Reporting Ceremony
 
