@@ -160,6 +160,42 @@ def load_law_articles(path: str | Path) -> list[dict]:
     return read_jsonl(str(path))
 
 
+def load_split_samples(config: dict, split: str) -> list[dict]:
+    split_paths = {
+        "train": config["data"].get("train_split_path"),
+        "val": config["data"].get("val_split_path"),
+        "validation": config["data"].get("val_split_path"),
+    }
+    if split not in split_paths:
+        raise ValueError("split must be one of: train, val, validation")
+
+    split_path = split_paths[split]
+    if not split_path:
+        raise KeyError(f"Missing config data path for split {split!r}")
+
+    path = Path(split_path)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{split} split not found at {path}. "
+            "Run `python -m src.data_utils --mode split` after W1-03 is merged."
+        )
+    return read_jsonl(str(path))
+
+
+def attach_train_image_path(sample: Mapping, config: dict) -> dict:
+    normalized = dict(sample)
+    if normalized.get("image_path"):
+        return normalized
+
+    image_id = normalized.get("image_id")
+    if not image_id:
+        raise ValueError("Sample is missing image_id and cannot resolve image_path")
+    normalized["image_path"] = str(
+        Path(config["data"]["train_image_dir"]).joinpath(str(image_id)).with_suffix(".jpg")
+    )
+    return normalized
+
+
 def get_law_article(
     law_id: str,
     article_id: str,
