@@ -210,6 +210,10 @@ when creating the actual week-1 issues.
 
 ## 6. Week 2: Retrieval and Few-Shot
 
+Detailed GitHub-ready issue bodies for this week are in
+[`docs/week2-issues.md`](week2-issues.md). Use that file as the source of truth
+when creating the actual week-2 issues.
+
 ### W2-01 - Text and whole-image feature extraction
 
 - **Owner/reviewer:** M2/M1; **priority:** P0; **days:** Mon-Tue.
