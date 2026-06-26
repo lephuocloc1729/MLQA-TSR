@@ -9,7 +9,15 @@ from uuid import uuid5, NAMESPACE_URL
 
 from qdrant_client import QdrantClient, models
 
-from src.data_utils import attach_train_image_path, load_law_articles, load_split_samples
+from src.data_utils import (
+    attach_train_image_path,
+    load_law_articles,
+    load_processed_law_article_index,
+    load_split_samples,
+    make_article_uid,
+    reference_uid,
+    resolve_law_reference,
+)
 from src.schemas import Evidence, Query
 from src.utils import (
     EmbeddingCache,
@@ -469,6 +477,11 @@ def make_example_vector_store(config: dict) -> QdrantExampleVectorStore:
     )
 
 
+def example_collection_exists(config: dict) -> bool:
+    store = make_example_vector_store(config)
+    return bool(store.client.collection_exists(store.collection_name))
+
+
 def example_payload(sample: dict[str, Any], split: str, config: dict) -> dict[str, Any]:
     sample = attach_train_image_path(sample, config)
     return {
@@ -578,6 +591,28 @@ class ExampleSearchResult(dict):
         }
 
 
+class FusedEvidenceResult(dict):
+    """Structured retrieval artifact with final `Evidence` plus diagnostics."""
+
+    @property
+    def evidence(self) -> list[Evidence]:
+        return self["evidence"]
+
+    @property
+    def diagnostics(self) -> list[dict[str, Any]]:
+        return self["diagnostics"]
+
+    def to_jsonable(self) -> dict[str, Any]:
+        return {
+            "direct_law": self["direct_law"],
+            "example_votes": self["example_votes"],
+            "diagnostics": self["diagnostics"],
+            "evidence": [
+                evidence.model_dump(mode="json") for evidence in self["evidence"]
+            ],
+        }
+
+
 def _query_points_by_mode(
     vector_store: ExampleVectorStore,
     mode: str,
@@ -660,6 +695,232 @@ def _merge_example_points(
     return results[:top_k]
 
 
+def _as_example_payload(example: ExampleSearchResult | dict[str, Any]) -> dict[str, Any]:
+    if isinstance(example, ExampleSearchResult):
+        return example.payload
+    if "payload" in example and isinstance(example["payload"], dict):
+        return example["payload"]
+    return example
+
+
+def _as_example_score(example: ExampleSearchResult | dict[str, Any]) -> float:
+    try:
+        score = example.get("score", 1.0)
+    except AttributeError:
+        score = 1.0
+    return float(score if score is not None else 1.0)
+
+
+def _as_example_rank(
+    example: ExampleSearchResult | dict[str, Any],
+    default_rank: int,
+) -> int:
+    try:
+        rank = example.get("rank", default_rank)
+    except AttributeError:
+        rank = default_rank
+    return max(1, int(rank or default_rank))
+
+
+def rank_weighted_example_votes(
+    examples: list[ExampleSearchResult | dict[str, Any]],
+) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
+    """Aggregate example citations using example score divided by example rank."""
+    votes: dict[str, dict[str, Any]] = {}
+    diagnostics: list[dict[str, Any]] = []
+    for default_rank, example in enumerate(examples, start=1):
+        payload = _as_example_payload(example)
+        sample_id = payload.get("sample_id") or payload.get("id") or f"example_{default_rank}"
+        rank = _as_example_rank(example, default_rank)
+        example_score = _as_example_score(example)
+        vote_increment = example_score / rank
+
+        for reference in payload.get("relevant_articles", []):
+            try:
+                uid = reference_uid(reference)
+            except ValueError as exc:
+                diagnostics.append(
+                    {
+                        "type": "invalid_example_reference",
+                        "sample_id": sample_id,
+                        "reference": dict(reference) if isinstance(reference, dict) else reference,
+                        "reason": str(exc),
+                    }
+                )
+                continue
+            item = votes.setdefault(
+                uid,
+                {
+                    "uid": uid,
+                    "law_id": reference["law_id"],
+                    "article_id": reference["article_id"],
+                    "score": 0.0,
+                    "count": 0,
+                    "sources": [],
+                },
+            )
+            item["score"] += vote_increment
+            item["count"] += 1
+            item["sources"].append(
+                {
+                    "sample_id": sample_id,
+                    "rank": rank,
+                    "example_score": example_score,
+                    "vote_increment": vote_increment,
+                }
+            )
+    return votes, diagnostics
+
+
+def _direct_evidence_components(
+    direct_evidence: list[Evidence],
+) -> dict[str, dict[str, Any]]:
+    components: dict[str, dict[str, Any]] = {}
+    for evidence in direct_evidence:
+        uid = evidence.uid
+        score = float(evidence.score if evidence.score is not None else 0.0)
+        if score == 0.0 and evidence.rank:
+            score = 1.0 / evidence.rank
+        components[uid] = {
+            "uid": uid,
+            "law_id": evidence.law_id,
+            "article_id": evidence.article_id,
+            "score": score,
+            "rank": evidence.rank,
+            "source": "direct_law",
+        }
+    return components
+
+
+def _resolve_fused_evidence(
+    uid: str,
+    law_id: str,
+    article_id: str,
+    article_index: dict[str, dict],
+    score: float,
+    rank: int,
+    metadata: dict[str, Any],
+) -> Evidence:
+    article = resolve_law_reference(
+        {"law_id": law_id, "article_id": article_id},
+        article_index,
+    )
+    return Evidence(
+        law_id=article["law_id"],
+        article_id=article["article_id"],
+        title=article["title"],
+        content=article["content"],
+        score=score,
+        rank=rank,
+        retrieval_method="fusion",
+        metadata={
+            "uid": uid,
+            "law_title": article.get("law_title"),
+            "images": article.get("images", []),
+            "tables": article.get("tables", []),
+            **metadata,
+        },
+    )
+
+
+def fuse_legal_evidence(
+    direct_evidence: list[Evidence],
+    examples: list[ExampleSearchResult | dict[str, Any]],
+    article_index: dict[str, dict],
+    top_k: int = 5,
+    direct_weight: float = 1.0,
+    example_vote_weight: float = 1.0,
+) -> FusedEvidenceResult:
+    if top_k <= 0:
+        raise ValueError("top_k must be positive")
+
+    direct_components = _direct_evidence_components(direct_evidence)
+    example_votes, diagnostics = rank_weighted_example_votes(examples)
+    candidate_uids = sorted(set(direct_components) | set(example_votes))
+    ranked_items: list[dict[str, Any]] = []
+
+    for uid in candidate_uids:
+        direct = direct_components.get(uid)
+        vote = example_votes.get(uid)
+        law_id = (direct or vote)["law_id"]
+        article_id = (direct or vote)["article_id"]
+        direct_score = float(direct["score"]) if direct else 0.0
+        example_vote_score = float(vote["score"]) if vote else 0.0
+        fusion_score = (direct_weight * direct_score) + (
+            example_vote_weight * example_vote_score
+        )
+        ranked_items.append(
+            {
+                "uid": uid,
+                "law_id": law_id,
+                "article_id": article_id,
+                "direct_score": direct_score,
+                "direct_rank": direct.get("rank") if direct else None,
+                "example_vote_score": example_vote_score,
+                "example_vote_count": vote.get("count", 0) if vote else 0,
+                "example_sources": vote.get("sources", []) if vote else [],
+                "fusion_score": fusion_score,
+                "source_mode": (
+                    "direct+examples"
+                    if direct and vote
+                    else "direct"
+                    if direct
+                    else "examples"
+                ),
+            }
+        )
+
+    ranked_items.sort(key=lambda item: (-item["fusion_score"], item["uid"]))
+    evidence: list[Evidence] = []
+    for item in ranked_items:
+        try:
+            evidence.append(
+                _resolve_fused_evidence(
+                    uid=item["uid"],
+                    law_id=item["law_id"],
+                    article_id=item["article_id"],
+                    article_index=article_index,
+                    score=item["fusion_score"],
+                    rank=len(evidence) + 1,
+                    metadata={
+                        "direct_score": item["direct_score"],
+                        "direct_rank": item["direct_rank"],
+                        "example_vote_score": item["example_vote_score"],
+                        "example_vote_count": item["example_vote_count"],
+                        "example_sources": item["example_sources"],
+                        "fusion_score": item["fusion_score"],
+                        "source_mode": item["source_mode"],
+                    },
+                )
+            )
+        except KeyError as exc:
+            diagnostics.append(
+                {
+                    "type": "unknown_law_article",
+                    "uid": item["uid"],
+                    "law_id": item["law_id"],
+                    "article_id": item["article_id"],
+                    "reason": str(exc),
+                    "source_mode": item["source_mode"],
+                }
+            )
+        if len(evidence) >= top_k:
+            break
+
+    return FusedEvidenceResult(
+        direct_law=[evidence_item.uid for evidence_item in direct_evidence],
+        example_votes=[
+            item["uid"]
+            for item in sorted(
+                example_votes.values(),
+                key=lambda item: (-item["score"], item["uid"]),
+            )
+        ],
+        diagnostics=diagnostics,
+        evidence=evidence,
+    )
+
+
 def retrieve_examples(
     query: dict[str, Any],
     config: dict,
@@ -710,6 +971,80 @@ def retrieve_examples(
         text_weight=float(retrieval_config.get("text_weight", 0.7)),
         image_weight=float(retrieval_config.get("image_weight", 0.3)),
     )
+
+
+def retrieve_fused_evidence(
+    query: dict[str, Any],
+    config: dict,
+    text_embedder: TextEmbedder | None = None,
+    law_vector_store: TextVectorStore | None = None,
+    example_text_embedder: TextEmbedder | None = None,
+    image_embedder: ImageEmbedder | None = None,
+    example_vector_store: ExampleVectorStore | None = None,
+    top_k: int | None = None,
+    example_top_k: int | None = None,
+    example_mode: str = "fusion",
+    allow_example_failure: bool | None = None,
+) -> FusedEvidenceResult:
+    retrieval_config = config.get("retrieval", {})
+    top_k = top_k or retrieval_config.get("top_k", 5)
+    example_top_k = example_top_k or retrieval_config.get("example_top_k", 3)
+    allow_example_failure = (
+        retrieval_config.get("fusion_allow_example_failure", True)
+        if allow_example_failure is None
+        else allow_example_failure
+    )
+    article_index = load_processed_law_article_index(config)
+    direct_evidence = retrieve_evidence(
+        query,
+        config,
+        embedder=text_embedder,
+        vector_store=law_vector_store,
+        top_k=top_k,
+    )
+
+    diagnostics: list[dict[str, Any]] = []
+    examples: list[ExampleSearchResult | dict[str, Any]] = []
+    try:
+        if (
+            example_vector_store is None
+            and allow_example_failure
+            and not example_collection_exists(config)
+        ):
+            raise RuntimeError(
+                "Example collection is unavailable. "
+                "Run `python -m src.retrieval --mode index-examples --split train` first."
+            )
+        examples = retrieve_examples(
+            query,
+            config,
+            mode=example_mode,
+            text_embedder=example_text_embedder or text_embedder,
+            image_embedder=image_embedder,
+            vector_store=example_vector_store,
+            top_k=example_top_k,
+        )
+    except Exception as exc:
+        if not allow_example_failure:
+            raise
+        diagnostics.append(
+            {
+                "type": "example_retrieval_failed",
+                "reason": str(exc),
+                "example_mode": example_mode,
+            }
+        )
+
+    result = fuse_legal_evidence(
+        direct_evidence=direct_evidence,
+        examples=examples,
+        article_index=article_index,
+        top_k=top_k,
+        direct_weight=float(retrieval_config.get("fusion_direct_weight", 1.0)),
+        example_vote_weight=float(retrieval_config.get("fusion_example_vote_weight", 1.0)),
+    )
+    result["diagnostics"].extend(diagnostics)
+    return result
 
 
 def index_law_articles(
@@ -863,11 +1198,29 @@ def run_retrieve_examples(args: argparse.Namespace) -> None:
     )
 
 
+def run_retrieve_fusion(args: argparse.Namespace) -> None:
+    config = load_config(args.config)
+    sample = load_query_sample_by_id(config, args.sample_id)
+    result = retrieve_fused_evidence(
+        sample,
+        config,
+        top_k=args.top_k,
+        example_mode=args.retrieval_mode,
+    )
+    print(json.dumps(result.to_jsonable(), ensure_ascii=False, indent=2))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Text retrieval over processed LawDB")
     parser.add_argument(
         "--mode",
-        choices=["index", "retrieve", "index-examples", "retrieve-examples"],
+        choices=[
+            "index",
+            "retrieve",
+            "index-examples",
+            "retrieve-examples",
+            "retrieve-fusion",
+        ],
         default="index",
     )
     parser.add_argument("--config", default="configs/config.yaml")
@@ -894,6 +1247,10 @@ def main() -> None:
         if not args.sample_id:
             parser.error("--sample-id is required when --mode retrieve-examples")
         run_retrieve_examples(args)
+    elif args.mode == "retrieve-fusion":
+        if not args.sample_id:
+            parser.error("--sample-id is required when --mode retrieve-fusion")
+        run_retrieve_fusion(args)
 
 
 if __name__ == "__main__":

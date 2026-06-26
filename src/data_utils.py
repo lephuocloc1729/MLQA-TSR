@@ -2,7 +2,7 @@ import argparse
 import re
 import unicodedata
 from pathlib import Path
-from typing import Iterable, Mapping
+from typing import Any, Iterable, Mapping
 
 from src.utils import load_config, read_json, read_jsonl, write_jsonl
 
@@ -171,6 +171,34 @@ def get_law_article(
         return article_index[uid]
     except KeyError as exc:
         raise KeyError(f"Unknown law article UID: {uid}") from exc
+
+
+def reference_uid(reference: Mapping[str, Any]) -> str:
+    law_id = _normalize_text(reference.get("law_id", ""))
+    article_id = _normalize_text(reference.get("article_id", ""))
+    if not law_id or not article_id:
+        raise ValueError("Law reference requires non-empty law_id and article_id")
+    return make_article_uid(law_id, article_id)
+
+
+def resolve_law_reference(
+    reference: Mapping[str, Any],
+    article_index: Mapping[str, dict],
+) -> dict:
+    """Resolve one law reference from the processed LawDB index."""
+    law_id = _normalize_text(reference.get("law_id", ""))
+    article_id = _normalize_text(reference.get("article_id", ""))
+    return get_law_article(law_id, article_id, article_index)
+
+
+def load_processed_law_article_index(config: dict) -> dict[str, dict]:
+    processed_path = Path(config["data"]["processed_law_path"])
+    if not processed_path.exists():
+        raise FileNotFoundError(
+            f"Processed LawDB not found at {processed_path}. "
+            "Run `python -m src.data_utils --mode preprocess` first."
+        )
+    return build_law_article_index(load_law_articles(processed_path))
 
 
 def build_law_articles(config: dict) -> list[dict]:

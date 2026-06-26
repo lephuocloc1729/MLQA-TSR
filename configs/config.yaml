@@ -34,6 +34,9 @@ retrieval:
   batch_size: 64
   text_weight: 0.7
   image_weight: 0.3
+  fusion_direct_weight: 1.0
+  fusion_example_vote_weight: 1.0
+  fusion_allow_example_failure: true
 
 embeddings:
   cache_dir: data/outputs/embeddings
