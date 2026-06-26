@@ -11,7 +11,14 @@ from qdrant_client import QdrantClient, models
 
 from src.data_utils import load_law_articles
 from src.schemas import Evidence, Query
-from src.utils import load_config, read_json
+from src.utils import (
+    EmbeddingCache,
+    file_sha256,
+    l2_normalize_vectors,
+    load_config,
+    read_json,
+    stable_json_hash,
+)
 
 
 class TextEmbedder(Protocol):
@@ -53,6 +60,97 @@ class SentenceTransformerEmbedder:
             show_progress_bar=False,
         )
         return vectors.astype("float32").tolist()
+
+
+def normalize_embedding_batch(
+    embeddings: list[list[float]],
+    normalize: bool = True,
+) -> list[list[float]]:
+    if not embeddings:
+        return []
+    return l2_normalize_vectors(embeddings) if normalize else embeddings
+
+
+def text_data_hash(texts: list[str]) -> str:
+    return stable_json_hash({"texts": texts})
+
+
+def embedding_model_name(embedder: TextEmbedder, fallback: str) -> str:
+    return str(getattr(embedder, "model_name", fallback))
+
+
+def embedding_cache_config(config: dict) -> dict[str, Any]:
+    return config.get("embeddings", {})
+
+
+def text_embedding_config(config: dict) -> dict[str, Any]:
+    return embedding_cache_config(config).get("text", {})
+
+
+def text_embedding_model_name(config: dict) -> str:
+    return text_embedding_config(config).get(
+        "model_name",
+        config.get("retrieval", {}).get(
+            "embedding_model",
+            "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        ),
+    )
+
+
+def embedding_cache_dir(config: dict) -> str:
+    return embedding_cache_config(config).get("cache_dir", "data/outputs/embeddings")
+
+
+def should_normalize_embeddings(config: dict) -> bool:
+    return bool(embedding_cache_config(config).get("normalize", True))
+
+
+def text_cache_enabled(config: dict, flag_name: str) -> bool:
+    return bool(text_embedding_config(config).get(flag_name, False))
+
+
+def embed_texts(
+    texts: list[str],
+    embedder: TextEmbedder,
+    normalize: bool = True,
+) -> list[list[float]]:
+    if not texts:
+        return []
+    return normalize_embedding_batch(embedder.embed_texts(texts), normalize=normalize)
+
+
+def embed_texts_cached(
+    texts: list[str],
+    embedder: TextEmbedder,
+    cache_dir: str | Path,
+    cache_key: str,
+    model_name: str,
+    data_hash: str | None = None,
+    normalize: bool = True,
+) -> list[list[float]]:
+    """Embed text with a metadata-validated local cache."""
+    data_hash = data_hash or text_data_hash(texts)
+    cache = EmbeddingCache(cache_dir)
+    metadata = {
+        "model_name": model_name,
+        "modality": "text",
+        "data_hash": data_hash,
+        "normalized": normalize,
+    }
+
+    if cache.exists(cache_key):
+        manifest = cache.read_manifest(cache_key)
+        return cache.read(
+            cache_key,
+            {
+                **metadata,
+                "dimension": manifest.get("dimension"),
+            },
+        )
+
+    embeddings = embed_texts(texts, embedder=embedder, normalize=normalize)
+    cache.write(cache_key, embeddings, metadata=metadata)
+    return embeddings
 
 
 class QdrantTextVectorStore:
@@ -222,10 +320,7 @@ def points_to_evidence(points: Iterable[Any], top_k: int) -> list[Evidence]:
 def make_embedder(config: dict) -> SentenceTransformerEmbedder:
     retrieval_config = config.get("retrieval", {})
     return SentenceTransformerEmbedder(
-        model_name=retrieval_config.get(
-            "embedding_model",
-            "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
-        ),
+        model_name=text_embedding_model_name(config),
         device=retrieval_config.get("device"),
     )
 
@@ -261,7 +356,23 @@ def index_law_articles(
     vector_store = vector_store or make_vector_store(config)
 
     texts = [build_article_text(article) for article in articles]
-    embeddings = embedder.embed_texts(texts)
+    model_name = embedding_model_name(embedder, text_embedding_model_name(config))
+    if text_cache_enabled(config, "cache_articles"):
+        embeddings = embed_texts_cached(
+            texts,
+            embedder=embedder,
+            cache_dir=embedding_cache_dir(config),
+            cache_key="law_articles_text",
+            model_name=model_name,
+            data_hash=file_sha256(processed_law_path),
+            normalize=should_normalize_embeddings(config),
+        )
+    else:
+        embeddings = embed_texts(
+            texts,
+            embedder=embedder,
+            normalize=should_normalize_embeddings(config),
+        )
     if not embeddings or not embeddings[0]:
         raise ValueError("Text embedder returned empty embeddings")
 
@@ -292,7 +403,23 @@ def retrieve_evidence(
     vector_store = vector_store or make_vector_store(config)
 
     query_text = build_query_text(query)
-    query_vector = embedder.embed_texts([query_text])[0]
+    model_name = embedding_model_name(embedder, text_embedding_model_name(config))
+    if text_cache_enabled(config, "cache_queries"):
+        query_vector = embed_texts_cached(
+            [query_text],
+            embedder=embedder,
+            cache_dir=embedding_cache_dir(config),
+            cache_key=f"query_text_{text_data_hash([query_text])}",
+            model_name=model_name,
+            data_hash=text_data_hash([query_text]),
+            normalize=should_normalize_embeddings(config),
+        )[0]
+    else:
+        query_vector = embed_texts(
+            [query_text],
+            embedder=embedder,
+            normalize=should_normalize_embeddings(config),
+        )[0]
     points = vector_store.query(query_vector=query_vector, top_k=top_k * 3)
     return points_to_evidence(points, top_k=top_k)
 
