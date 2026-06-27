@@ -62,20 +62,47 @@ class TransformersImageBackend:
         inputs = self.processor(images=images, return_tensors="pt").to(self.device)
         with self.torch.no_grad():
             if hasattr(self.model, "get_image_features"):
-                features = self.model.get_image_features(**inputs)
+                features = _extract_feature_tensor(
+                    self.model.get_image_features(**inputs)
+                )
             else:
-                outputs = self.model(**inputs)
-                if hasattr(outputs, "image_embeds") and outputs.image_embeds is not None:
-                    features = outputs.image_embeds
-                elif hasattr(outputs, "pooler_output") and outputs.pooler_output is not None:
-                    features = outputs.pooler_output
-                elif hasattr(outputs, "last_hidden_state"):
-                    features = outputs.last_hidden_state[:, 0]
-                else:
-                    raise RuntimeError(
-                        "Image model output does not expose image embeddings"
-                    )
+                features = _extract_feature_tensor(self.model(**inputs))
         return features.detach().cpu().float().numpy().tolist()
+
+
+def _extract_feature_tensor(output: Any) -> Any:
+    """Return a tensor from common image model output shapes."""
+    if hasattr(output, "detach"):
+        return output
+
+    if isinstance(output, dict):
+        for key in ("image_embeds", "pooler_output"):
+            value = output.get(key)
+            if value is not None:
+                return _extract_feature_tensor(value)
+        value = output.get("last_hidden_state")
+        if value is not None:
+            return value[:, 0]
+
+    for attr in ("image_embeds", "pooler_output"):
+        value = getattr(output, attr, None)
+        if value is not None:
+            return _extract_feature_tensor(value)
+
+    last_hidden_state = getattr(output, "last_hidden_state", None)
+    if last_hidden_state is not None:
+        return last_hidden_state[:, 0]
+
+    if isinstance(output, (tuple, list)):
+        if len(output) > 1 and output[1] is not None:
+            return _extract_feature_tensor(output[1])
+        if output:
+            first = output[0]
+            if hasattr(first, "ndim") and first.ndim >= 3:
+                return first[:, 0]
+            return _extract_feature_tensor(first)
+
+    raise RuntimeError("Image model output does not expose image embeddings")
 
 
 class ImageEmbeddingAdapter:
