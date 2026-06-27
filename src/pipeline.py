@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any, Mapping
@@ -28,6 +29,7 @@ from src.vlm import LegalQAVLM
 
 EXPERIMENT_SCHEMA_VERSION = "w2-ablation-v1"
 DEFAULT_EXPERIMENT_DIR = "data/outputs/experiments"
+DEMO_SCHEMA_VERSION = "demo-inspection-v1"
 
 
 class BenchmarkRuntime:
@@ -131,6 +133,25 @@ def load_benchmark_samples(config: Mapping[str, Any], limit: int | None = None) 
     return samples[:limit] if limit is not None else samples
 
 
+def demo_config(config: Mapping[str, Any]) -> dict[str, Any]:
+    return dict(config.get("demo", {}))
+
+
+def load_demo_samples(config: Mapping[str, Any], split: str = "val") -> list[dict[str, Any]]:
+    return load_split_samples(dict(config), split)
+
+
+def load_demo_sample_by_id(
+    config: Mapping[str, Any],
+    sample_id: str,
+    split: str = "val",
+) -> dict[str, Any]:
+    for sample in load_demo_samples(config, split=split):
+        if sample.get("id") == sample_id:
+            return sample
+    raise KeyError(f"Sample {sample_id!r} not found in {split!r} split")
+
+
 def retrieval_strategy(config: Mapping[str, Any]) -> str:
     experiment = experiment_config(config)
     strategy = str(experiment.get("retrieval_strategy", "text")).strip().lower()
@@ -159,12 +180,117 @@ def is_mock_run(config: Mapping[str, Any]) -> bool:
     return bool(experiment_config(config).get("mock", True))
 
 
+def demo_model_status(
+    config: Mapping[str, Any],
+    include_prediction: bool = False,
+    use_mock_prediction: bool = False,
+    environ: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Describe whether the demo can produce an answer without exposing secrets."""
+    environ = environ or os.environ
+    config_demo = demo_config(config)
+    api_key_env = str(config_demo.get("vlm_api_key_env", "OPENAI_API_KEY"))
+
+    if not include_prediction:
+        return {
+            "available": False,
+            "mode": "retrieval_only",
+            "reason": "Prediction disabled; showing retrieval evidence only.",
+        }
+    if use_mock_prediction:
+        return {
+            "available": True,
+            "mode": "mock_prediction",
+            "reason": "Using deterministic mock prediction for UI smoke testing.",
+        }
+    if config_demo.get("enable_vlm") and not environ.get(api_key_env):
+        return {
+            "available": False,
+            "mode": "retrieval_only",
+            "reason": f"Missing VLM credential environment variable: {api_key_env}.",
+        }
+    return {
+        "available": False,
+        "mode": "retrieval_only",
+        "reason": "No VLM backend is configured in this demo build.",
+    }
+
+
 def citation_dict(citation: Citation) -> dict[str, str]:
     return {"law_id": citation.law_id, "article_id": citation.article_id}
 
 
 def evidence_citations(evidence: list[Evidence]) -> list[dict[str, str]]:
     return [citation_dict(item.to_citation()) for item in evidence]
+
+
+def evidence_to_demo_item(evidence: Evidence) -> dict[str, Any]:
+    return {
+        "uid": evidence.uid,
+        "law_id": evidence.law_id,
+        "article_id": evidence.article_id,
+        "title": evidence.title,
+        "content": evidence.content,
+        "score": evidence.score,
+        "rank": evidence.rank,
+        "retrieval_method": evidence.retrieval_method.value,
+        "citation": citation_dict(evidence.to_citation()),
+    }
+
+
+def query_to_demo_sample(query: Query) -> dict[str, Any]:
+    image_path = Path(query.image_path) if query.image_path else None
+    return {
+        "id": query.id,
+        "image_id": query.image_id,
+        "image_display_name": image_path.name if image_path else query.image_id,
+        "image_exists": bool(image_path and image_path.exists()),
+        "question": query.question,
+        "question_type": query.question_type.value if query.question_type else None,
+        "choices": query.choices,
+        "gold_answer_available": query.answer is not None,
+        "gold_citation_count": len(query.relevant_articles),
+    }
+
+
+def prediction_to_demo_item(prediction: Prediction | None) -> dict[str, Any] | None:
+    if prediction is None:
+        return None
+    return {
+        "answer": prediction.answer,
+        "citations": [citation_dict(citation) for citation in prediction.citations],
+        "explanation": prediction.explanation,
+        "confidence": prediction.confidence,
+        "abstained": prediction.abstained,
+    }
+
+
+def make_demo_inspection_record(
+    sample: dict[str, Any] | Query,
+    evidence: list[Evidence],
+    retrieval_strategy_name: str,
+    top_k: int,
+    diagnostics: list[dict[str, Any]] | None = None,
+    prediction: Prediction | None = None,
+    model_status: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    query = sample if isinstance(sample, Query) else Query.model_validate(sample)
+    image_path = query.image_path
+    return {
+        "schema_version": DEMO_SCHEMA_VERSION,
+        "sample": query_to_demo_sample(query),
+        "local_image_path": image_path,
+        "retrieval": {
+            "strategy": retrieval_strategy_name,
+            "top_k": top_k,
+            "evidence_count": len(evidence),
+            "evidence": [evidence_to_demo_item(item) for item in evidence],
+            "citation_ids": [item.uid for item in evidence],
+            "diagnostics": list(diagnostics or []),
+        },
+        "prediction": prediction_to_demo_item(prediction),
+        "model": dict(model_status or {}),
+    }
 
 
 def default_answer_for_type(question_type: QuestionType | None) -> str:
@@ -233,6 +359,51 @@ def retrieve_for_sample(
         ),
     )
     return fused.evidence, [], list(fused.diagnostics)
+
+
+def build_demo_inspection(
+    sample_id: str,
+    config: Mapping[str, Any],
+    split: str = "val",
+    top_k: int | None = None,
+    retrieval_strategy_name: str = "text",
+    include_prediction: bool = False,
+    use_mock_prediction: bool = False,
+    runtime: BenchmarkRuntime | None = None,
+) -> dict[str, Any]:
+    runtime = runtime or BenchmarkRuntime(config)
+    sample = load_demo_sample_by_id(config, sample_id=sample_id, split=split)
+    query = Query.model_validate(sample)
+    local_config = dict(config)
+    local_config["experiment"] = {
+        **experiment_config(config),
+        "retrieval_strategy": retrieval_strategy_name,
+    }
+    local_config["retrieval"] = dict(config.get("retrieval", {}))
+    if top_k is not None:
+        local_config["retrieval"]["top_k"] = int(top_k)
+    resolved_top_k = int(local_config.get("retrieval", {}).get("top_k", 5))
+
+    evidence, _, diagnostics = retrieve_for_sample(sample, local_config, runtime)
+    model_status = demo_model_status(
+        config,
+        include_prediction=include_prediction,
+        use_mock_prediction=use_mock_prediction,
+    )
+    prediction = (
+        mock_prediction(query, evidence)
+        if include_prediction and use_mock_prediction
+        else None
+    )
+    return make_demo_inspection_record(
+        sample=query,
+        evidence=evidence,
+        retrieval_strategy_name=retrieval_strategy_name,
+        top_k=resolved_top_k,
+        diagnostics=diagnostics,
+        prediction=prediction,
+        model_status=model_status,
+    )
 
 
 def retrieve_prompt_examples(
