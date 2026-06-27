@@ -3,7 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import src.pipeline as pipeline
-from src.schemas import Evidence, PipelineResult
+from src.schemas import Evidence, PipelineResult, Prediction
 
 
 LAW_ID = "QCVN 41:2024/BGTVT"
@@ -33,6 +33,19 @@ class FakeVLM:
                 ],
             }
         ]
+
+
+class FakeRealVLM(FakeVLM):
+    def __init__(self, prediction=None, error: Exception | None = None) -> None:
+        super().__init__()
+        self.prediction = prediction
+        self.error = error
+
+    def answer(self, query, evidence, examples=None, variant=None):
+        self.build_messages(query, evidence, examples=examples, variant=variant)
+        if self.error:
+            raise self.error
+        return self.prediction
 
 
 def sample(**overrides) -> dict:
@@ -170,3 +183,57 @@ def test_generated_result_jsonl_validates_with_pipeline_result(monkeypatch, tmp_
     assert result.query.id == "val_tiny_1"
     assert result.evidence[0].uid == f"{LAW_ID}#22"
     assert row["experiment"]["name"] == "test_release_pipeline"
+
+
+def test_non_mock_benchmark_uses_real_vlm_runtime(monkeypatch):
+    prediction = Prediction(
+        id="val_tiny_1",
+        question_type="Multiple choice",
+        answer="B",
+        citations=[{"law_id": LAW_ID, "article_id": "22"}],
+        explanation="Dựa trên Điều 22.",
+        confidence=0.8,
+        abstained=False,
+        raw_response='{"answer":"B"}',
+    )
+    fake_vlm = FakeRealVLM(prediction=prediction)
+    fake_runtime = SimpleNamespace(vlm=fake_vlm)
+    monkeypatch.setattr(pipeline, "retrieve_for_sample", fake_retrieve_for_sample)
+    monkeypatch.setattr(pipeline, "retrieve_prompt_examples", lambda *args: [])
+
+    record = pipeline.build_benchmark_record(
+        sample(),
+        config(mock=False, retrieval_strategy="text", prompt_variant="text_rag"),
+        runtime=fake_runtime,
+    )
+
+    result = PipelineResult.model_validate(
+        {
+            "query": record["query"],
+            "evidence": record["evidence"],
+            "prediction": record["prediction"],
+            "timings_ms": record["timings_ms"],
+        }
+    )
+    assert record["mock"] is False
+    assert record["experiment"]["mock"] is False
+    assert result.prediction.answer == "B"
+    assert fake_vlm.calls[-1]["variant"] == "text_rag"
+
+
+def test_non_mock_model_error_is_recorded_as_invalid_sample(monkeypatch):
+    fake_vlm = FakeRealVLM(error=ValueError("bad model JSON"))
+    fake_runtime = SimpleNamespace(vlm=fake_vlm)
+    monkeypatch.setattr(pipeline, "retrieve_for_sample", fake_retrieve_for_sample)
+    monkeypatch.setattr(pipeline, "retrieve_prompt_examples", lambda *args: [])
+
+    record = pipeline.build_benchmark_record(
+        sample(),
+        config(mock=False, retrieval_strategy="text", prompt_variant="text_rag"),
+        runtime=fake_runtime,
+    )
+
+    assert record["mock"] is False
+    assert record["prediction"]["answer"] is None
+    assert record["prediction"]["error"]["type"] == "ValueError"
+    assert record["diagnostics"][-1]["type"] == "model_error"

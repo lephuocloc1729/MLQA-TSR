@@ -450,6 +450,61 @@ def build_prompt_metadata(
     }
 
 
+def error_benchmark_record(
+    query: Query,
+    evidence: list[Evidence],
+    timings_ms: dict[str, float],
+    prompt_metadata: Mapping[str, Any],
+    diagnostics: list[dict[str, Any]],
+    config: Mapping[str, Any],
+    variant: PromptVariant,
+    error: Exception,
+) -> dict[str, Any]:
+    error_type = type(error).__name__
+    error_message = str(error)
+    diagnostics = [
+        *diagnostics,
+        {
+            "type": "model_error",
+            "error_type": error_type,
+            "message": error_message,
+        },
+    ]
+    return {
+        "schema_version": EXPERIMENT_SCHEMA_VERSION,
+        "query": query.model_dump(mode="json"),
+        "evidence": [item.model_dump(mode="json") for item in evidence],
+        "detected_signs": [],
+        "prediction": {
+            "id": query.id,
+            "question_type": query.question_type.value if query.question_type else None,
+            "answer": None,
+            "citations": [],
+            "explanation": f"Model error: {error_type}: {error_message}",
+            "confidence": 0.0,
+            "abstained": True,
+            "raw_response": None,
+            "error": {
+                "type": error_type,
+                "message": error_message,
+            },
+        },
+        "timings_ms": timings_ms,
+        "experiment": {
+            "name": experiment_name(config),
+            "label": experiment_config(config).get("label"),
+            "mock": is_mock_run(config),
+            "retrieval_strategy": retrieval_strategy(config),
+            "prompt_variant": variant.value,
+        },
+        "mock": is_mock_run(config),
+        "predicted_articles": evidence_citations(evidence),
+        "prompt": dict(prompt_metadata),
+        "diagnostics": diagnostics,
+        "created_at": utc_now_iso(),
+    }
+
+
 def build_benchmark_record(
     sample: dict[str, Any],
     config: Mapping[str, Any],
@@ -478,10 +533,25 @@ def build_benchmark_record(
     if is_mock_run(config):
         prediction = mock_prediction(query, evidence)
     else:
-        raise RuntimeError(
-            "Real VLM generation is not configured in this pipeline runner. "
-            "Set experiment.mock=true for a smoke benchmark or inject a VLM backend later."
-        )
+        try:
+            prediction = runtime.vlm.answer(
+                query,
+                evidence,
+                examples=examples,
+                variant=variant,
+            )
+        except Exception as exc:
+            timings_ms["generation"] = (time.perf_counter() - generation_start) * 1000
+            return error_benchmark_record(
+                query=query,
+                evidence=evidence,
+                timings_ms=timings_ms,
+                prompt_metadata=prompt_metadata,
+                diagnostics=diagnostics,
+                config=config,
+                variant=variant,
+                error=exc,
+            )
     timings_ms["generation"] = (time.perf_counter() - generation_start) * 1000
 
     pipeline_result = PipelineResult(
@@ -542,7 +612,10 @@ def main() -> None:
     args = parse_args()
     config = load_config(args.config)
     if args.mode == "benchmark":
-        output_path = run_benchmark(config, limit=args.limit, output_path=args.output)
+        try:
+            output_path = run_benchmark(config, limit=args.limit, output_path=args.output)
+        except RuntimeError as exc:
+            raise SystemExit(f"ERROR: {exc}") from None
         print(
             json.dumps(
                 {
