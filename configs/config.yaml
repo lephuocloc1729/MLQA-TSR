@@ -19,7 +19,11 @@ data:
   processed_law_path: data/processed/law_articles.jsonl
   train_split_path: data/processed/train_split.jsonl
   val_split_path: data/processed/val_split.jsonl
+  split_manifest_path: data/processed/split_manifest.json
   regression_path: data/processed/regression_set.json
+
+split:
+  validation_ratio: 0.2
 
 qdrant:
   url: http://localhost:6333
