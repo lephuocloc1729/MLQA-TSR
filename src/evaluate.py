@@ -204,10 +204,11 @@ def extract_gold_citations(record: Mapping[str, Any]) -> list[Any]:
 def extract_predicted_citations(record: Mapping[str, Any]) -> list[Any]:
     prediction = as_mapping(record.get("prediction"))
     for value in (
-        prediction.get("citations"),
         record.get("predicted_articles"),
         record.get("predicted_citations"),
         record.get("citations"),
+        record.get("evidence"),
+        prediction.get("citations"),
     ):
         if isinstance(value, list):
             return value
@@ -411,11 +412,23 @@ def build_evaluation_artifact(
     retrieval = evaluate_retrieval(records)
     qa = evaluate_qa(records, invalid_predictions)
     project_config = as_mapping(config.get("project"))
+    experiment_config = as_mapping(config.get("experiment"))
     path = Path(predictions_path) if predictions_path else None
 
     return {
-        "config_name": project_config.get("name"),
+        "schema_version": "w2-ablation-metrics-v1",
+        "config_name": experiment_config.get("name") or project_config.get("name"),
         "seed": project_config.get("seed"),
+        "experiment": {
+            "name": experiment_config.get("name") or project_config.get("name"),
+            "label": experiment_config.get("label"),
+            "mock": experiment_config.get("mock"),
+            "retrieval_strategy": experiment_config.get("retrieval_strategy"),
+            "prompt_variant": experiment_config.get("prompt_variant")
+            or as_mapping(config.get("prompt")).get("variant"),
+            "output_path": experiment_config.get("output_path"),
+        },
+        "mock": experiment_config.get("mock"),
         "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "predictions_path": str(path) if path else None,
         "predictions_sha256": file_sha256(path) if path and path.exists() else None,
@@ -437,6 +450,9 @@ def build_evaluation_artifact(
 
 
 def default_output_path(config: Mapping[str, Any], predictions_path: str | Path) -> Path:
+    experiment_config = as_mapping(config.get("experiment"))
+    if experiment_config.get("metrics_path"):
+        return Path(str(experiment_config["metrics_path"]))
     output_dir = Path(as_mapping(config.get("output")).get("dir", "data/outputs"))
     return output_dir / f"{Path(predictions_path).stem}_metrics.json"
 

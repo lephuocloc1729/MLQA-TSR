@@ -10,9 +10,35 @@ import numpy as np
 import yaml
 
 
+def deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict:
+    """Recursively merge dictionaries without mutating either input."""
+    merged = dict(base)
+    for key, value in override.items():
+        if (
+            key in merged
+            and isinstance(merged[key], Mapping)
+            and isinstance(value, Mapping)
+        ):
+            merged[key] = deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
 def load_config(path: str = "configs/config.yaml") -> dict:
-    with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    config_path = Path(path)
+    with config_path.open("r", encoding="utf-8") as f:
+        config = yaml.safe_load(f) or {}
+
+    extends = config.pop("extends", None)
+    if not extends:
+        return config
+
+    parent_path = Path(extends)
+    if not parent_path.is_absolute():
+        parent_path = config_path.parent / parent_path
+    parent_config = load_config(str(parent_path))
+    return deep_merge(parent_config, config)
 
 
 def read_json(path: str):

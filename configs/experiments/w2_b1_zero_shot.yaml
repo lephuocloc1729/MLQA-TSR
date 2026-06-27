@@ -1,0 +1,15 @@
+extends: ../config.yaml
+
+experiment:
+  name: w2_b1_zero_shot
+  label: B1_zero_shot
+  description: Image and question only; no LawDB evidence.
+  split: val
+  mock: true
+  retrieval_strategy: none
+  prompt_variant: zero_shot
+  output_path: data/outputs/experiments/w2_b1_zero_shot.jsonl
+  metrics_path: data/outputs/experiments/w2_b1_zero_shot_metrics.json
+
+prompt:
+  variant: zero_shot
