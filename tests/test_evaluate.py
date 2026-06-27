@@ -5,6 +5,7 @@ import pytest
 
 from src.evaluate import (
     build_evaluation_artifact,
+    default_output_path,
     normalize_gold_answer,
     normalize_prediction_answer,
     read_prediction_jsonl,
@@ -127,3 +128,17 @@ def test_tiny_fixture_evaluates_and_is_serializable():
     assert artifact["sample_count"] == 3
     assert artifact["invalid_prediction_count"] == 1
     assert artifact["qa"]["by_question_type"]["Multiple choice"]["total"] == 2
+
+
+def test_default_metrics_path_is_saved_beside_predictions():
+    path = Path("data/outputs/experiments/run.jsonl")
+
+    assert default_output_path({}, path) == Path("data/outputs/experiments/run_metrics.json")
+
+
+def test_configured_metrics_path_wins_over_default():
+    config = {"experiment": {"metrics_path": "data/outputs/custom_metrics.json"}}
+
+    assert default_output_path(config, "data/outputs/experiments/run.jsonl") == Path(
+        "data/outputs/custom_metrics.json"
+    )

@@ -1,4 +1,6 @@
-.PHONY: help setup check-data qdrant-up qdrant-down preprocess index retrieve task1 task2 assistant eval demo ci-test test verify clean
+.PHONY: help setup check-data qdrant-up qdrant-down preprocess index index-examples index-week2 retrieve benchmark-b2 benchmark-b3 benchmark-b4 benchmark-week2-smoke task1 task2 assistant eval demo ci-test test verify clean
+
+SMOKE_LIMIT ?= 5
 
 help:
 	@echo "Traffic Legal VLM - common commands"
@@ -13,11 +15,15 @@ help:
 	@echo "  make qdrant-up   Start Qdrant with docker compose"
 	@echo "  make qdrant-down Stop Qdrant"
 	@echo ""
-	@echo "Pipeline placeholders:"
-	@echo "  make preprocess  Build processed LawDB articles"
-	@echo "  make index       Build the retrieval index"
-	@echo "  make eval        Evaluate data/outputs/dev_predictions.jsonl"
-	@echo "  make demo        Start the Streamlit demo"
+	@echo "Pipeline:"
+	@echo "  make preprocess       Build processed LawDB articles"
+	@echo "  make index            Build the LawDB text retrieval index"
+	@echo "  make index-examples   Build the week-2 train-example index"
+	@echo "  make index-week2      Build both week-2 retrieval indexes"
+	@echo "  make benchmark-b2     Run B2 Text-RAG smoke benchmark"
+	@echo "  make benchmark-b3     Run B3 fused-RAG smoke benchmark"
+	@echo "  make benchmark-b4     Run B4 few-shot-RAG smoke benchmark"
+	@echo "  make demo             Start the Streamlit demo"
 
 setup:
 	python -m pip install --upgrade pip
@@ -36,7 +42,13 @@ preprocess:
 	python -m src.data_utils --mode preprocess
 
 index:
-	python -m src.retrieval --mode index
+	bash scripts/index.sh law
+
+index-examples:
+	bash scripts/index.sh examples
+
+index-week2:
+	bash scripts/index.sh week2
 
 retrieve:
 	python -m src.retrieval --mode retrieve
@@ -52,6 +64,17 @@ assistant:
 
 eval:
 	bash scripts/evaluate.sh
+
+benchmark-b2:
+	bash scripts/evaluate.sh run-experiment configs/experiments/w2_b2_text_rag.yaml $(SMOKE_LIMIT)
+
+benchmark-b3:
+	bash scripts/evaluate.sh run-experiment configs/experiments/w2_b3_fused_rag.yaml $(SMOKE_LIMIT)
+
+benchmark-b4:
+	bash scripts/evaluate.sh run-experiment configs/experiments/w2_b4_few_shot_rag.yaml $(SMOKE_LIMIT)
+
+benchmark-week2-smoke: benchmark-b2 benchmark-b3 benchmark-b4
 
 demo:
 	python -m streamlit run app/streamlit_app.py

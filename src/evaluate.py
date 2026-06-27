@@ -238,6 +238,14 @@ def extract_total_latency_ms(record: Mapping[str, Any]) -> float | None:
     return None
 
 
+def first_record_experiment(records: list[Mapping[str, Any]]) -> Mapping[str, Any]:
+    for record in records:
+        experiment = as_mapping(record.get("experiment"))
+        if experiment:
+            return experiment
+    return {}
+
+
 def is_valid_prediction_answer(answer: str, question_type: str) -> bool:
     if not answer:
         return False
@@ -413,22 +421,30 @@ def build_evaluation_artifact(
     qa = evaluate_qa(records, invalid_predictions)
     project_config = as_mapping(config.get("project"))
     experiment_config = as_mapping(config.get("experiment"))
+    record_experiment = first_record_experiment(records)
     path = Path(predictions_path) if predictions_path else None
+    resolved_experiment_name = (
+        experiment_config.get("name")
+        or record_experiment.get("name")
+        or project_config.get("name")
+    )
 
     return {
         "schema_version": "w2-ablation-metrics-v1",
-        "config_name": experiment_config.get("name") or project_config.get("name"),
+        "config_name": resolved_experiment_name,
         "seed": project_config.get("seed"),
         "experiment": {
-            "name": experiment_config.get("name") or project_config.get("name"),
-            "label": experiment_config.get("label"),
-            "mock": experiment_config.get("mock"),
-            "retrieval_strategy": experiment_config.get("retrieval_strategy"),
+            "name": resolved_experiment_name,
+            "label": experiment_config.get("label") or record_experiment.get("label"),
+            "mock": experiment_config.get("mock", record_experiment.get("mock")),
+            "retrieval_strategy": experiment_config.get("retrieval_strategy")
+            or record_experiment.get("retrieval_strategy"),
             "prompt_variant": experiment_config.get("prompt_variant")
+            or record_experiment.get("prompt_variant")
             or as_mapping(config.get("prompt")).get("variant"),
             "output_path": experiment_config.get("output_path"),
         },
-        "mock": experiment_config.get("mock"),
+        "mock": experiment_config.get("mock", record_experiment.get("mock")),
         "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "predictions_path": str(path) if path else None,
         "predictions_sha256": file_sha256(path) if path and path.exists() else None,
@@ -453,8 +469,8 @@ def default_output_path(config: Mapping[str, Any], predictions_path: str | Path)
     experiment_config = as_mapping(config.get("experiment"))
     if experiment_config.get("metrics_path"):
         return Path(str(experiment_config["metrics_path"]))
-    output_dir = Path(as_mapping(config.get("output")).get("dir", "data/outputs"))
-    return output_dir / f"{Path(predictions_path).stem}_metrics.json"
+    path = Path(predictions_path)
+    return path.with_name(f"{path.stem}_metrics.json")
 
 
 def parse_args() -> argparse.Namespace:
@@ -474,7 +490,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         default=None,
-        help="Where to save the metrics artifact. Defaults to data/outputs/<stem>_metrics.json.",
+        help="Where to save the metrics artifact. Defaults to <predictions_stem>_metrics.json beside the predictions file.",
     )
     return parser.parse_args()
 
