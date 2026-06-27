@@ -1,0 +1,21 @@
+extends: ../config.yaml
+
+experiment:
+  name: w2_b3_fused_rag
+  label: B3_fused_rag
+  description: Direct LawDB retrieval plus example citation voting.
+  split: val
+  mock: true
+  retrieval_strategy: fusion
+  prompt_variant: text_rag
+  example_retrieval_mode: fusion
+  output_path: data/outputs/experiments/w2_b3_fused_rag.jsonl
+  metrics_path: data/outputs/experiments/w2_b3_fused_rag_metrics.json
+
+retrieval:
+  top_k: 5
+  example_top_k: 3
+  fusion_allow_example_failure: false
+
+prompt:
+  variant: text_rag

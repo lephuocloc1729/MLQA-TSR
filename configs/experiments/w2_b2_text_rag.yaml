@@ -1,0 +1,18 @@
+extends: ../config.yaml
+
+experiment:
+  name: w2_b2_text_rag
+  label: B2_text_rag
+  description: Direct LawDB text retrieval with the structured JSON prompt.
+  split: val
+  mock: true
+  retrieval_strategy: text
+  prompt_variant: text_rag
+  output_path: data/outputs/experiments/w2_b2_text_rag.jsonl
+  metrics_path: data/outputs/experiments/w2_b2_text_rag_metrics.json
+
+retrieval:
+  top_k: 5
+
+prompt:
+  variant: text_rag
