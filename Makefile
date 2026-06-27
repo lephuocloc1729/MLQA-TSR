@@ -54,7 +54,7 @@ eval:
 	bash scripts/evaluate.sh
 
 demo:
-	streamlit run app/streamlit_app.py
+	python -m streamlit run app/streamlit_app.py
 
 ci-test:
 	python -c 'import sys, types; sys.modules.setdefault("readline", types.ModuleType("readline")); import pytest; raise SystemExit(pytest.main(["-q", "tests/test_schemas.py"], plugins=[]))'

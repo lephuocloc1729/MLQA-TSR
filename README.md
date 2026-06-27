@@ -97,6 +97,39 @@ make qdrant-up
 make qdrant-down
 ```
 
+## Streamlit Evidence Inspector
+
+Week 2 includes a lightweight retrieval inspection demo. It is meant for
+debugging and weekly reporting, not as the final polished app.
+
+Prepare local data and indexes:
+
+```bash
+make qdrant-up
+python -m src.data_utils --mode preprocess
+python -m src.data_utils --mode split
+python -m src.retrieval --mode index
+```
+
+If you want to inspect fused retrieval or few-shot examples, also build the
+training-example index:
+
+```bash
+python -m src.retrieval --mode index-examples --split train
+```
+
+Start the demo:
+
+```bash
+python -m streamlit run app/streamlit_app.py
+```
+
+The app supports selecting a validation sample, viewing the image/question,
+retrieving top-k legal evidence, copying citation IDs, and optionally showing a
+mock prediction panel. It does not require model/API credentials for retrieval
+inspection. If no VLM backend is configured, it stays in retrieval-only mode and
+shows a clear message.
+
 If plain `pytest` crashes on macOS because of a local `readline` issue, use
 `make test` or `make ci-test`. Both commands inject a lightweight `readline`
 shim before importing pytest.
