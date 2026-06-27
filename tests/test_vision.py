@@ -3,7 +3,12 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from src.vision import ImageEmbeddingAdapter, embed_images_cached, load_rgb_image
+from src.vision import (
+    ImageEmbeddingAdapter,
+    _extract_feature_tensor,
+    embed_images_cached,
+    load_rgb_image,
+)
 
 
 class FakeImageBackend:
@@ -86,3 +91,34 @@ def test_missing_image_path_error_is_helpful(tmp_path: Path):
 
     with pytest.raises(FileNotFoundError, match="Image file not found"):
         load_rgb_image(missing_path)
+
+
+def test_extract_feature_tensor_supports_transformers_pooling_output():
+    torch = pytest.importorskip("torch")
+
+    class OutputWithPooling:
+        def __init__(self):
+            self.pooler_output = torch.tensor([[1.0, 2.0, 3.0]])
+
+    features = _extract_feature_tensor(OutputWithPooling())
+
+    assert features.tolist() == [[1.0, 2.0, 3.0]]
+
+
+def test_extract_feature_tensor_falls_back_to_first_image_token():
+    torch = pytest.importorskip("torch")
+
+    class OutputWithHiddenState:
+        def __init__(self):
+            self.last_hidden_state = torch.tensor(
+                [
+                    [
+                        [1.0, 2.0],
+                        [3.0, 4.0],
+                    ]
+                ]
+            )
+
+    features = _extract_feature_tensor(OutputWithHiddenState())
+
+    assert features.tolist() == [[1.0, 2.0]]

@@ -225,6 +225,34 @@ def load_law_article_index(config: dict) -> dict[str, dict]:
     return build_law_article_index(load_law_articles(processed_path))
 
 
+def reference_uid(reference: Mapping[str, Any]) -> str:
+    law_id = _normalize_text(reference.get("law_id", ""))
+    article_id = _normalize_text(reference.get("article_id", ""))
+    if not law_id or not article_id:
+        raise ValueError("Law reference requires non-empty law_id and article_id")
+    return make_article_uid(law_id, article_id)
+
+
+def resolve_law_reference(
+    reference: Mapping[str, Any],
+    article_index: Mapping[str, dict],
+) -> dict:
+    """Resolve one law reference from the processed LawDB index."""
+    law_id = _normalize_text(reference.get("law_id", ""))
+    article_id = _normalize_text(reference.get("article_id", ""))
+    return get_law_article(law_id, article_id, article_index)
+
+
+def load_processed_law_article_index(config: dict) -> dict[str, dict]:
+    processed_path = Path(config["data"]["processed_law_path"])
+    if not processed_path.exists():
+        raise FileNotFoundError(
+            f"Processed LawDB not found at {processed_path}. "
+            "Run `python -m src.data_utils --mode preprocess` first."
+        )
+    return build_law_article_index(load_law_articles(processed_path))
+
+
 def normalize_article_reference(
     reference: Mapping[str, Any],
     article_index: Mapping[str, dict],
@@ -392,7 +420,9 @@ def summarize_samples(samples: list[dict]) -> dict:
         "sample_count": len(samples),
         "image_count": len({sample["image_id"] for sample in samples}),
         "question_type_distribution": dict(
-            sorted(Counter(sample.get("question_type", "Unknown") for sample in samples).items())
+            sorted(
+                Counter(sample.get("question_type", "Unknown") for sample in samples).items()
+            )
         ),
         "answer_distribution": dict(
             sorted(Counter(sample.get("answer", "") for sample in samples).items())
