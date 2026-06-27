@@ -18,6 +18,7 @@ class PromptVariant(str, Enum):
     ZERO_SHOT = "zero_shot"
     TEXT_RAG = "text_rag"
     FEW_SHOT_RAG = "few_shot_rag"
+    STRUCTURED_LEGAL_RAG = "structured_legal_rag"
 
 
 @dataclass(frozen=True)
@@ -176,6 +177,20 @@ def answer_instruction(query: Query) -> str:
     return "For free-form demo mode, answer with a short legal conclusion."
 
 
+def structured_legal_explanation_instruction() -> str:
+    return "\n".join(
+        [
+            "Structured explanation requirements:",
+            "- The explanation field must be concise and contain exactly these labeled parts:",
+            "  Observation: one short sentence about the visible/question context.",
+            "  Legal basis: one short sentence naming the cited article(s) and legal rule.",
+            "  Conclusion: one short sentence linking the rule to the final answer.",
+            "- Do not expose hidden chain-of-thought, private deliberation, or step-by-step reasoning.",
+            "- If evidence is insufficient, set abstained=true and use the three labels to state what is missing.",
+        ]
+    )
+
+
 def build_legal_qa_prompt(
     query: Query | dict,
     evidence: Iterable[Evidence | dict],
@@ -216,6 +231,9 @@ def build_legal_qa_prompt(
             + format_few_shot_examples(examples or [], query_model, config)
         )
 
+    if prompt_variant == PromptVariant.STRUCTURED_LEGAL_RAG:
+        sections.append(structured_legal_explanation_instruction())
+
     sections.extend(
         [
             "Output requirements:\n"
@@ -231,7 +249,8 @@ def build_legal_qa_prompt(
             + answer_instruction(query_model),
             "JSON schema:\n"
             '{"answer":"A","citations":[{"law_id":"...","article_id":"..."}],'
-            '"explanation":"...","confidence":0.0,"abstained":false}',
+            '"explanation":"Observation: ... Legal basis: ... Conclusion: ...",'
+            '"confidence":0.0,"abstained":false}',
         ]
     )
     return "\n\n".join(sections)
