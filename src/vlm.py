@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
+import mimetypes
+import os
 import re
 import unicodedata
+import urllib.error
+import urllib.request
+from pathlib import Path
 from typing import Any, Mapping, Protocol
 
 from src.prompts import (
@@ -38,8 +44,148 @@ class VLMClient(Protocol):
         ...
 
 
+class OpenAICompatibleClient:
+    """Minimal OpenAI-compatible chat-completions client using stdlib HTTP."""
+
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        timeout_seconds: float = 120.0,
+    ) -> None:
+        if not base_url:
+            raise ValueError("OpenAI-compatible backend requires a non-empty base_url")
+        if not api_key:
+            raise ValueError("OpenAI-compatible backend requires a non-empty API key")
+        self.endpoint = chat_completions_endpoint(base_url)
+        self.api_key = api_key
+        self.timeout_seconds = timeout_seconds
+
+    def generate(
+        self,
+        messages: list[dict],
+        model_name: str,
+        temperature: float,
+        max_new_tokens: int,
+    ) -> str:
+        payload = {
+            "model": model_name,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_new_tokens,
+        }
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(
+            self.endpoint,
+            data=body,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                raw = response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            error_body = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(
+                f"VLM backend HTTP {exc.code}: {error_body[:500]}"
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"VLM backend request failed: {exc.reason}") from exc
+
+        data = json.loads(raw)
+        try:
+            content = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise RuntimeError("VLM backend response is missing choices[0].message.content") from exc
+        if not isinstance(content, str) or not content.strip():
+            raise RuntimeError("VLM backend returned an empty response")
+        return content
+
+
+def chat_completions_endpoint(base_url: str) -> str:
+    normalized = base_url.rstrip("/")
+    if normalized.endswith("/chat/completions"):
+        return normalized
+    return normalized + "/chat/completions"
+
+
+def load_dotenv_if_available() -> None:
+    try:
+        from dotenv import load_dotenv
+    except Exception:
+        return
+    load_dotenv()
+
+
+def env_value(
+    environ: Mapping[str, str],
+    name: str | None,
+    default: str | None = None,
+) -> str | None:
+    if name and environ.get(name):
+        return environ[name]
+    return default
+
+
+def create_vlm_client(
+    model_config: Mapping[str, Any],
+    environ: Mapping[str, str] | None = None,
+) -> VLMClient | None:
+    backend = str(model_config.get("backend", "none")).strip().lower()
+    if backend in {"", "none", "mock", "fake"}:
+        return None
+
+    if environ is None:
+        load_dotenv_if_available()
+        environ = os.environ
+
+    if backend in {"openai_compatible", "openai-compatible", "openai"}:
+        api_key_env = str(model_config.get("api_key_env", "OPENAI_COMPATIBLE_API_KEY"))
+        base_url_env = str(
+            model_config.get("base_url_env", "OPENAI_COMPATIBLE_BASE_URL")
+        )
+        api_key = env_value(environ, api_key_env, model_config.get("api_key"))
+        base_url = env_value(environ, base_url_env, model_config.get("base_url"))
+        missing = []
+        if not api_key:
+            missing.append(api_key_env)
+        if not base_url:
+            missing.append(base_url_env)
+        if missing:
+            raise RuntimeError(
+                "Missing VLM backend configuration. Set environment variable(s): "
+                + ", ".join(missing)
+            )
+        return OpenAICompatibleClient(
+            base_url=str(base_url),
+            api_key=str(api_key),
+            timeout_seconds=float(model_config.get("request_timeout_seconds", 120)),
+        )
+
+    raise ValueError(f"Unsupported VLM backend: {backend}")
+
+
 def normalize_text(value: Any) -> str:
     return unicodedata.normalize("NFC", str(value)).strip()
+
+
+def image_path_to_data_url(path: str | Path) -> str:
+    image_path = Path(path)
+    if not image_path.exists():
+        raise FileNotFoundError(f"VLM image input not found: {image_path}")
+    mime_type = mimetypes.guess_type(image_path.name)[0] or "image/jpeg"
+    encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
+def query_image_message_part(query: Query) -> dict[str, Any] | None:
+    image_path = query.image_path
+    if not image_path:
+        return None
+    return {"type": "image_url", "image_url": {"url": image_path_to_data_url(image_path)}}
 
 
 def extract_json_object(raw_response: str) -> dict[str, Any]:
@@ -143,12 +289,23 @@ class LegalQAVLM:
         self,
         config: Mapping[str, Any],
         client: VLMClient | None = None,
+        environ: Mapping[str, str] | None = None,
     ) -> None:
         model_config = config.get("model", {})
         prompt_config = config.get("prompt", {})
-        self.model_name = model_config.get("name", "Qwen/Qwen2.5-VL-3B-Instruct")
+        if environ is None:
+            load_dotenv_if_available()
+            environ = os.environ
+        name_env = model_config.get("name_env")
+        self.backend = str(model_config.get("backend", "none")).strip().lower()
+        self.model_name = env_value(
+            environ,
+            str(name_env) if name_env else None,
+            model_config.get("name", "Qwen/Qwen2.5-VL-3B-Instruct"),
+        )
         self.temperature = float(model_config.get("temperature", 0.0))
         self.max_new_tokens = int(model_config.get("max_new_tokens", 512))
+        self.include_image = bool(model_config.get("include_image", False))
         self.prompt_variant = normalize_prompt_variant(
             prompt_config.get("variant", PromptVariant.TEXT_RAG.value)
         )
@@ -162,7 +319,10 @@ class LegalQAVLM:
             max_example_chars=int(prompt_config.get("max_example_chars", 700)),
             top_examples=int(prompt_config.get("top_examples", 3)),
         )
-        self.client = client
+        self.client = client if client is not None else create_vlm_client(
+            model_config,
+            environ=environ,
+        )
 
     @classmethod
     def from_config(
@@ -179,13 +339,21 @@ class LegalQAVLM:
         examples: list[Mapping[str, Any]] | None = None,
         variant: PromptVariant | str | None = None,
     ) -> list[dict]:
-        return build_vlm_messages(
-            query,
+        query_model = query if isinstance(query, Query) else Query.model_validate(query)
+        messages = build_vlm_messages(
+            query_model,
             evidence,
             examples=examples,
             variant=variant or self.prompt_variant,
             prompt_config=self.prompt_config,
         )
+        image_part = query_image_message_part(query_model) if self.include_image else None
+        if image_part is not None:
+            content = messages[0].setdefault("content", [])
+            if not isinstance(content, list):
+                raise ValueError("VLM message content must be a list for image input")
+            content.append(image_part)
+        return messages
 
     def answer(
         self,

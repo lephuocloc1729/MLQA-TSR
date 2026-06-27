@@ -170,6 +170,32 @@ The prediction JSONL and metrics artifacts are written under
 `data/outputs/experiments/`. That directory is ignored by Git because it may
 contain bulky generated outputs.
 
+## Real VLM Backend
+
+Week 3 non-mock benchmarks use an OpenAI-compatible chat-completions endpoint.
+Credentials stay in `.env` or shell environment variables:
+
+```bash
+export OPENAI_COMPATIBLE_BASE_URL="http://localhost:8000/v1"
+export OPENAI_COMPATIBLE_API_KEY="replace-with-your-key"
+export OPENAI_COMPATIBLE_MODEL="Qwen/Qwen2.5-VL-3B-Instruct"
+```
+
+Run one real Text-RAG sample when the endpoint is available:
+
+```bash
+python -m src.pipeline --mode benchmark \
+  --config configs/experiments/w3_b2_text_rag_real.yaml \
+  --limit 1
+python -m src.evaluate \
+  --predictions data/outputs/experiments/w3_b2_text_rag_real.jsonl
+```
+
+If credentials or the endpoint are missing, the pipeline fails with a clear
+configuration error before contacting a model. If the model call itself fails,
+the benchmark writes an invalid/error sample instead of inventing a fallback
+answer.
+
 If plain `pytest` crashes on macOS because of a local `readline` issue, use
 `make test` or `make ci-test`. Both commands inject a lightweight `readline`
 shim before importing pytest.

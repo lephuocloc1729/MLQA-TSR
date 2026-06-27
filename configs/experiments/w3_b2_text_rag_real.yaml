@@ -1,0 +1,24 @@
+extends: ../config.yaml
+
+experiment:
+  name: w3_b2_text_rag_real
+  label: W3_B2_text_rag_real
+  description: Real VLM run with direct LawDB text retrieval.
+  split: val
+  mock: false
+  retrieval_strategy: text
+  prompt_variant: text_rag
+  output_path: data/outputs/experiments/w3_b2_text_rag_real.jsonl
+  metrics_path: data/outputs/experiments/w3_b2_text_rag_real_metrics.json
+
+model:
+  backend: openai_compatible
+  name_env: OPENAI_COMPATIBLE_MODEL
+  api_key_env: OPENAI_COMPATIBLE_API_KEY
+  base_url_env: OPENAI_COMPATIBLE_BASE_URL
+  temperature: 0.0
+  max_new_tokens: 512
+  include_image: true
+
+prompt:
+  variant: text_rag
