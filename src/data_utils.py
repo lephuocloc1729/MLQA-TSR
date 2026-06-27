@@ -10,7 +10,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from src.schemas import Query
+from src.prompts import PromptVariant, build_legal_qa_prompt
+from src.schemas import Evidence, PipelineResult, Prediction, Query, RetrievalMethod
 from src.utils import load_config, read_json, read_jsonl, write_json, write_jsonl
 
 
@@ -20,6 +21,8 @@ TITLE_ARTICLE_ID_PATTERN = re.compile(r"^([A-ZĐ]\.\d+(?:\.\d+)*|\d+(?:\.\d+)*)\
 QCVN_LAW_ID = "QCVN 41:2024/BGTVT"
 ROAD_TRAFFIC_LAW_ID = "36/2024/QH15"
 DEFAULT_VALIDATION_RATIO = 0.2
+DEFAULT_SFT_TRAIN_PATH = "data/processed/sft_train.jsonl"
+DEFAULT_SFT_VAL_PATH = "data/processed/sft_val.jsonl"
 
 
 ARTICLE_REFERENCE_ALIASES: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {
@@ -530,6 +533,256 @@ def validate_data(config: dict) -> dict:
     return summary
 
 
+def law_article_to_oracle_evidence(article: Mapping[str, Any], rank: int) -> Evidence:
+    return Evidence(
+        law_id=str(article["law_id"]),
+        article_id=str(article["article_id"]),
+        title=str(article.get("title") or ""),
+        content=str(article["content"]),
+        score=1.0,
+        rank=rank,
+        retrieval_method=RetrievalMethod.ORACLE,
+        metadata={
+            "uid": article.get("uid"),
+            "law_title": article.get("law_title"),
+            "images": article.get("images", []),
+            "tables": article.get("tables", []),
+        },
+    )
+
+
+def build_oracle_evidence(
+    sample: Mapping[str, Any],
+    article_index: Mapping[str, dict],
+) -> list[Evidence]:
+    evidence: list[Evidence] = []
+    seen_uids: set[str] = set()
+    for reference in sample.get("relevant_articles", []):
+        article = resolve_law_reference(reference, article_index)
+        uid = article["uid"]
+        if uid in seen_uids:
+            continue
+        seen_uids.add(uid)
+        evidence.append(law_article_to_oracle_evidence(article, rank=len(evidence) + 1))
+    return evidence
+
+
+def build_sft_target(query: Query, evidence: list[Evidence]) -> dict[str, Any]:
+    if query.answer is None:
+        raise ValueError(f"SFT sample {query.id!r} is missing a gold answer")
+
+    citations = [
+        {"law_id": item.law_id, "article_id": item.article_id}
+        for item in evidence
+    ]
+    if citations:
+        cited_uids = ", ".join(item.uid for item in evidence)
+        explanation = f"Dựa trên các căn cứ pháp lý đã trích dẫn: {cited_uids}."
+        confidence = 1.0
+        abstained = False
+    else:
+        explanation = "Không đủ căn cứ pháp lý trong dữ liệu huấn luyện để kết luận."
+        confidence = 0.0
+        abstained = True
+
+    target = {
+        "answer": query.answer,
+        "citations": citations,
+        "explanation": explanation,
+        "confidence": confidence,
+        "abstained": abstained,
+    }
+    prediction = Prediction.model_validate(
+        {
+            **target,
+            "id": query.id,
+            "question_type": query.question_type,
+        }
+    )
+    PipelineResult(query=query, evidence=evidence, prediction=prediction)
+    return target
+
+
+def build_sft_record(
+    sample: Mapping[str, Any],
+    article_index: Mapping[str, dict],
+    split: str,
+    prompt_variant: str | PromptVariant = PromptVariant.TEXT_RAG,
+    evidence_strategy: str = "oracle",
+) -> dict[str, Any]:
+    """Create one supervised multimodal legal QA record without split leakage."""
+    if evidence_strategy != "oracle":
+        raise ValueError("W3-01 SFT data currently supports evidence_strategy='oracle'")
+    if split not in {"train", "val", "validation"}:
+        raise ValueError("SFT split must be one of: train, val, validation")
+
+    query = Query.model_validate(sample)
+    evidence = build_oracle_evidence(sample, article_index)
+    target = build_sft_target(query, evidence)
+    user_prompt = build_legal_qa_prompt(
+        query,
+        evidence,
+        examples=[],
+        variant=prompt_variant,
+    )
+    assistant_content = json.dumps(target, ensure_ascii=False, separators=(",", ":"))
+
+    return {
+        "id": query.id,
+        "split": "val" if split == "validation" else split,
+        "image_id": query.image_id,
+        "image_path": query.image_path,
+        "question_type": query.question_type.value if query.question_type else None,
+        "messages": [
+            {"role": "user", "content": user_prompt},
+            {"role": "assistant", "content": assistant_content},
+        ],
+        "target": target,
+        "evidence": [
+            item.model_dump(mode="json", exclude_none=True)
+            for item in evidence
+        ],
+        "source": {
+            "evidence_strategy": evidence_strategy,
+            "prompt_variant": str(
+                prompt_variant.value
+                if isinstance(prompt_variant, PromptVariant)
+                else prompt_variant
+            ),
+            "citation_count": len(target["citations"]),
+        },
+    }
+
+
+def build_sft_records(
+    samples: list[dict],
+    article_index: Mapping[str, dict],
+    split: str,
+    prompt_variant: str | PromptVariant = PromptVariant.TEXT_RAG,
+    evidence_strategy: str = "oracle",
+) -> list[dict]:
+    return [
+        build_sft_record(
+            sample,
+            article_index,
+            split=split,
+            prompt_variant=prompt_variant,
+            evidence_strategy=evidence_strategy,
+        )
+        for sample in samples
+    ]
+
+
+def validate_sft_split_leakage(
+    train_records: list[Mapping[str, Any]],
+    val_records: list[Mapping[str, Any]],
+) -> None:
+    train_ids = {str(record["id"]) for record in train_records}
+    val_ids = {str(record["id"]) for record in val_records}
+    if train_ids & val_ids:
+        raise ValueError("SFT train and validation records overlap by sample ID")
+
+    train_images = {str(record["image_id"]) for record in train_records}
+    val_images = {str(record["image_id"]) for record in val_records}
+    overlap = train_images & val_images
+    if overlap:
+        raise ValueError(
+            "SFT train and validation records overlap by image_id: "
+            + ", ".join(sorted(overlap))
+        )
+
+
+def sft_config(config: Mapping[str, Any]) -> Mapping[str, Any]:
+    return config.get("sft", {}) if isinstance(config.get("sft"), Mapping) else {}
+
+
+def sft_train_output_path(config: Mapping[str, Any]) -> str:
+    data_config = config.get("data", {})
+    sft = sft_config(config)
+    return str(
+        sft.get("train_output_path")
+        or data_config.get("sft_train_path")
+        or DEFAULT_SFT_TRAIN_PATH
+    )
+
+
+def sft_val_output_path(config: Mapping[str, Any]) -> str:
+    data_config = config.get("data", {})
+    sft = sft_config(config)
+    return str(
+        sft.get("val_output_path")
+        or data_config.get("sft_val_path")
+        or DEFAULT_SFT_VAL_PATH
+    )
+
+
+def build_sft_datasets(config: dict) -> dict[str, Any]:
+    sft = sft_config(config)
+    train_split_path = str(
+        sft.get("source_train_split_path")
+        or config["data"]["train_split_path"]
+    )
+    val_split_path = str(
+        sft.get("source_val_split_path")
+        or config["data"]["val_split_path"]
+    )
+    processed_law_path = str(
+        sft.get("processed_law_path")
+        or config["data"]["processed_law_path"]
+    )
+
+    for path, command in [
+        (train_split_path, "python -m src.data_utils --mode split"),
+        (val_split_path, "python -m src.data_utils --mode split"),
+        (processed_law_path, "python -m src.data_utils --mode preprocess"),
+    ]:
+        if not Path(path).exists():
+            raise FileNotFoundError(
+                f"Required SFT input not found at {path}. "
+                f"Run `{command}` first."
+            )
+
+    article_index = build_law_article_index(load_law_articles(processed_law_path))
+    train_samples = read_jsonl(train_split_path)
+    val_samples = read_jsonl(val_split_path)
+    prompt_variant = sft.get("prompt_variant", PromptVariant.TEXT_RAG.value)
+    evidence_strategy = str(sft.get("evidence_strategy", "oracle"))
+
+    train_records = build_sft_records(
+        train_samples,
+        article_index,
+        split="train",
+        prompt_variant=prompt_variant,
+        evidence_strategy=evidence_strategy,
+    )
+    val_records = build_sft_records(
+        val_samples,
+        article_index,
+        split="val",
+        prompt_variant=prompt_variant,
+        evidence_strategy=evidence_strategy,
+    )
+    validate_sft_split_leakage(train_records, val_records)
+
+    train_output_path = sft_train_output_path(config)
+    val_output_path = sft_val_output_path(config)
+    write_jsonl(train_records, train_output_path)
+    write_jsonl(val_records, val_output_path)
+
+    summary = {
+        "train_path": train_output_path,
+        "val_path": val_output_path,
+        "train_count": len(train_records),
+        "val_count": len(val_records),
+        "train_image_count": len({record["image_id"] for record in train_records}),
+        "val_image_count": len({record["image_id"] for record in val_records}),
+        "prompt_variant": str(prompt_variant),
+        "evidence_strategy": evidence_strategy,
+    }
+    print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+    return summary
+
+
 def build_law_articles(config: dict) -> list[dict]:
     law_path = config["data"]["law_path"]
     output_path = config["data"]["processed_law_path"]
@@ -553,14 +806,18 @@ def preprocess():
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", default="preprocess")
+    parser.add_argument("--config", default="configs/config.yaml")
     args = parser.parse_args()
+    config = load_config(args.config)
 
     if args.mode == "preprocess":
-        preprocess()
+        build_law_articles(config)
     elif args.mode == "split":
-        split_train_validation(load_config())
+        split_train_validation(config)
     elif args.mode == "validate":
-        validate_data(load_config())
+        validate_data(config)
+    elif args.mode == "build-sft":
+        build_sft_datasets(config)
     else:
         raise ValueError(f"Unknown mode: {args.mode}")
 
