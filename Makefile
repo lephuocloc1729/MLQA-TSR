@@ -16,7 +16,7 @@ help:
 	@echo "Pipeline placeholders:"
 	@echo "  make preprocess  Build processed LawDB articles"
 	@echo "  make index       Build the retrieval index"
-	@echo "  make eval        Evaluate saved predictions"
+	@echo "  make eval        Evaluate data/outputs/dev_predictions.jsonl"
 	@echo "  make demo        Start the Streamlit demo"
 
 setup:
@@ -51,7 +51,7 @@ assistant:
 	python -m src.pipeline --mode assistant
 
 eval:
-	python -m src.evaluate
+	bash scripts/evaluate.sh
 
 demo:
 	streamlit run app/streamlit_app.py

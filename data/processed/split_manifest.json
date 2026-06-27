@@ -1,0 +1,81 @@
+{
+  "created_at": "2026-06-24T12:50:32.009540Z",
+  "seed": 42,
+  "validation_ratio": 0.2,
+  "raw_train_path": "data/raw/train_data/vlsp_2025_train.json",
+  "processed_law_path": "data/processed/law_articles.jsonl",
+  "train_split_path": "data/processed/train_split.jsonl",
+  "val_split_path": "data/processed/val_split.jsonl",
+  "raw_train_sha256": "49d28bcef00906ebf3da4331306d08158150da237d0106ddb28fa9b6a1bf9d03",
+  "processed_law_sha256": "8afcfebe76952a0d23edb2da24494e97d1ffdf57ff87a54004f3688b9e4238f9",
+  "config_hash": "f0da7d80f07033efbeba4a69b5c146de2a05e95e21c1af64cc2ee2f90a4cb8cb",
+  "split_hash": "3ffba07cf68cccfdfaf921d34d01903223c96810979cb573c68c67c7b3471448",
+  "total_count": 530,
+  "total_image_count": 304,
+  "train_count": 421,
+  "val_count": 109,
+  "train_image_count": 244,
+  "val_image_count": 60,
+  "train": {
+    "sample_count": 421,
+    "image_count": 244,
+    "question_type_distribution": {
+      "Multiple choice": 299,
+      "Yes/No": 122
+    },
+    "answer_distribution": {
+      "A": 94,
+      "B": 79,
+      "C": 69,
+      "D": 57,
+      "Sai": 64,
+      "Đúng": 58
+    }
+  },
+  "val": {
+    "sample_count": 109,
+    "image_count": 60,
+    "question_type_distribution": {
+      "Multiple choice": 77,
+      "Yes/No": 32
+    },
+    "answer_distribution": {
+      "A": 21,
+      "B": 24,
+      "C": 15,
+      "D": 17,
+      "Sai": 15,
+      "Đúng": 17
+    }
+  },
+  "audit": {
+    "answer_normalizations": {
+      "40 -> A": 1,
+      "Đúng -> Đúng": 15
+    },
+    "citation_normalizations": {
+      "36/2024/QH15#11.0 -> 36/2024/QH15#11": 2,
+      "36/2024/QH15#16.0 -> 36/2024/QH15#16": 1,
+      "36/2024/QH15#18.0 -> 36/2024/QH15#18": 1,
+      "36/2024/QH15#22.0 -> 36/2024/QH15#22": 1,
+      "36/2024/QH15#26.0 -> 36/2024/QH15#26": 2,
+      "36/2024/QH15#4.0 -> 36/2024/QH15#4": 1,
+      "36/2024/QH15#9.0 -> 36/2024/QH15#9": 1,
+      "QCVN 41:2024/BGTVT#22 B.15 -> QCVN 41:2024/BGTVT#22, QCVN 41:2024/BGTVT#B.15": 2,
+      "QCVN 41:2024/BGTVT#47.15 -> QCVN 41:2024/BGTVT#47": 1,
+      "QCVN 41:2024/BGTVT#47.22 -> QCVN 41:2024/BGTVT#47": 1,
+      "QCVN 41:2024/BGTVT#47.7 -> QCVN 41:2024/BGTVT#47": 1,
+      "QCVN 41:2024/BGTVT#B -> QCVN 41:2024/BGTVT#M.1": 1,
+      "QCVN 41:2024/BGTVT#B.3; 41 -> QCVN 41:2024/BGTVT#B.3, QCVN 41:2024/BGTVT#41": 4,
+      "QCVN 41:2024/BGTVT#B.4_x0000_ -> QCVN 41:2024/BGTVT#B.4": 1,
+      "QCVN 41:2024/BGTVT#B3 -> QCVN 41:2024/BGTVT#B.3": 1,
+      "QCVN 41:2024/BGTVT#B6 -> QCVN 41:2024/BGTVT#B.6": 1,
+      "QCVN 41:2024/BGTVT#D.11 -> QCVN 41:2024/BGTVT#D.10": 3,
+      "QCVN 41:2024/BGTVT#D.1777 -> QCVN 41:2024/BGTVT#C.45": 1,
+      "QCVN 41:2024/BGTVT#F.10; 22 -> QCVN 41:2024/BGTVT#F.10, QCVN 41:2024/BGTVT#22": 1,
+      "QCVN 41:2024/BGTVT#G1.1 -> QCVN 41:2024/BGTVT#G.1": 1,
+      "QCVN 41:2024/BGTVT#G1.2 -> QCVN 41:2024/BGTVT#G.1": 1,
+      "QCVN 41:2024/BGTVT#I.414 -> QCVN 41:2024/BGTVT#E.14": 1
+    }
+  }
+}
