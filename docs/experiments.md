@@ -90,7 +90,24 @@ Or use the helper:
 scripts/evaluate.sh run-experiment configs/experiments/w2_b2_text_rag.yaml 5
 ```
 
-Run the full W2 matrix when Qdrant indexes are ready:
+For the week-2 release candidate, use the Makefile wrappers:
+
+```bash
+make preprocess
+make qdrant-up
+make index
+make index-examples
+make benchmark-b2
+make benchmark-b3
+make benchmark-b4
+```
+
+`make index-week2` can replace `make index` plus `make index-examples`.
+`make benchmark-week2-smoke` runs B2, B3, and B4 in sequence with
+`SMOKE_LIMIT ?= 5`.
+
+Run the full W2 matrix without a limit only after Qdrant indexes are ready and
+the model backend has enough compute budget:
 
 ```bash
 for cfg in configs/experiments/w2_b*.yaml; do
@@ -111,17 +128,23 @@ The metrics files are saved beside the predictions:
 - `data/outputs/experiments/w2_b3_fused_rag_metrics.json`
 - `data/outputs/experiments/w2_b4_few_shot_rag_metrics.json`
 
-### Ablation Table Template
+### Week 2 Smoke Ablation
 
-Fill this table after running the matrix. For mock runs, keep `Mock? = yes`
-and do not present QA accuracy as model quality.
+These values come from a five-sample smoke run on the locked validation split.
+For mock runs, keep `Mock? = yes` and do not present QA accuracy as model
+quality.
 
 | Run | Mock? | Split hash | Top-k | Retrieval F2 | QA Accuracy | Invalid | Mean latency ms | Notes |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| B1_zero_shot | yes | `3ffba07c...` | 0 | TBD | TBD | TBD | TBD | no legal retrieval |
-| B2_text_rag | yes | `3ffba07c...` | 5 | TBD | TBD | TBD | TBD | week-1 direct retrieval |
-| B3_fused_rag | yes | `3ffba07c...` | 5 | TBD | TBD | TBD | TBD | citation votes from examples |
-| B4_few_shot_rag | yes | `3ffba07c...` | 5 | TBD | TBD | TBD | TBD | top-3 retrieved examples in prompt |
+| B1_zero_shot | yes | `3ffba07c...` | 0 | not applicable | not run | not run | not run | no legal retrieval in W2 release smoke |
+| B2_text_rag | yes | `3ffba07c...` | 5 | 0.0769 | 0.2000 | 0 | 3083.9 | week-1 direct LawDB retrieval |
+| B3_fused_rag | yes | `3ffba07c...` | 5 | 0.3764 | 0.2000 | 0 | 4938.5 | direct retrieval plus example citation votes |
+| B4_few_shot_rag | yes | `3ffba07c...` | 5 | 0.3764 | 0.2000 | 0 | 4069.5 | fused evidence plus top-3 retrieved examples |
+
+The smoke run used seed `42`, `train_count=421`, `val_count=109`, and split
+hash `3ffba07cf68cccfdfaf921d34d01903223c96810979cb573c68c67c7b3471448`.
+The QA predictor was deterministic mock logic, so the QA accuracy column only
+confirms evaluator and artifact wiring.
 
 ## Naming
 

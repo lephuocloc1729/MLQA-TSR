@@ -130,6 +130,46 @@ mock prediction panel. It does not require model/API credentials for retrieval
 inspection. If no VLM backend is configured, it stays in retrieval-only mode and
 shows a clear message.
 
+## Week 2 Retrieval And Few-Shot Release
+
+The week-2 release flow compares the locked validation split across the Text
+RAG baseline, fused retrieval, and retrieved few-shot prompting. The current
+configs use `experiment.mock: true`, so the numbers are pipeline smoke metrics,
+not final VLM accuracy.
+
+Build the required processed data and indexes:
+
+```bash
+make preprocess
+make qdrant-up
+make index
+make index-examples
+```
+
+You can also build both week-2 indexes with one wrapper:
+
+```bash
+make index-week2
+```
+
+Run the smoke benchmarks with a five-sample limit:
+
+```bash
+make benchmark-b2
+make benchmark-b3
+make benchmark-b4
+```
+
+Or run the same three configs in sequence:
+
+```bash
+make benchmark-week2-smoke
+```
+
+The prediction JSONL and metrics artifacts are written under
+`data/outputs/experiments/`. That directory is ignored by Git because it may
+contain bulky generated outputs.
+
 If plain `pytest` crashes on macOS because of a local `readline` issue, use
 `make test` or `make ci-test`. Both commands inject a lightweight `readline`
 shim before importing pytest.
