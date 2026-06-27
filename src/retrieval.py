@@ -586,6 +586,7 @@ class ExampleSearchResult(dict):
             "answer": payload.get("answer"),
             "relevant_articles": payload.get("relevant_articles", []),
             "image_path": payload.get("image_path"),
+            "split": payload.get("split"),
             "score": self["score"],
             "retrieval_mode": self["retrieval_mode"],
         }

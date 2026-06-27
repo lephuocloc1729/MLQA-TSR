@@ -61,8 +61,12 @@ model:
   max_new_tokens: 512
 
 prompt:
+  variant: text_rag
   image_placeholder: <IMAGE>
+  example_image_placeholder: <EXAMPLE_IMAGE_{index}>
   max_evidence_chars: 1200
+  max_example_chars: 700
+  top_examples: 3
 
 output:
   dir: data/outputs

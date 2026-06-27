@@ -240,6 +240,7 @@ def test_payload_round_trip_into_prompt_ready_example(tmp_path):
     assert prompt_example["sample_id"] == "train_1"
     assert prompt_example["answer"] == "C"
     assert prompt_example["relevant_articles"] == [{"law_id": LAW_ID, "article_id": "22"}]
+    assert prompt_example["split"] == "train"
     assert prompt_example["score"] == 0.42
 
 
