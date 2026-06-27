@@ -413,7 +413,10 @@ def build_prompt_for_sample(
     evidence: list[Evidence | dict] = []
     examples: list[Mapping[str, Any]] = []
 
-    if prompt_variant == PromptVariant.TEXT_RAG:
+    if prompt_variant in {
+        PromptVariant.TEXT_RAG,
+        PromptVariant.STRUCTURED_LEGAL_RAG,
+    }:
         evidence = retrieve_evidence(query, dict(config), top_k=top_k)
     elif prompt_variant == PromptVariant.FEW_SHOT_RAG:
         if not example_collection_exists(dict(config)):
