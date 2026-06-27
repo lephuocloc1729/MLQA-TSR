@@ -290,6 +290,10 @@ when creating the actual week-1 issues.
 
 ## 7. Week 3: QLoRA and Controlled Experiments
 
+Detailed GitHub-ready issue bodies for this week are in
+[`docs/week3-issues.md`](week3-issues.md). Use that file as the source of truth
+when creating the actual week-3 issues.
+
 ### W3-01 - Build SFT examples and multimodal collator
 
 - **Owner/reviewer:** M1/M4; **priority:** P0; **days:** Mon-Tue.

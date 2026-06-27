@@ -20,6 +20,7 @@ env/
 data/raw/
 data/interim/
 data/outputs/
+data/processed/sft_*.jsonl
 qdrant_storage/
 
 # Keep empty folders if needed

@@ -18,5 +18,14 @@ data:
   train_path: data/processed/sft_train.jsonl
   val_path: data/processed/sft_val.jsonl
 
+sft:
+  source_train_split_path: data/processed/train_split.jsonl
+  source_val_split_path: data/processed/val_split.jsonl
+  processed_law_path: data/processed/law_articles.jsonl
+  train_output_path: data/processed/sft_train.jsonl
+  val_output_path: data/processed/sft_val.jsonl
+  evidence_strategy: oracle
+  prompt_variant: text_rag
+
 output:
   checkpoint_dir: checkpoints/qlora_adapter
