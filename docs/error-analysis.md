@@ -25,18 +25,23 @@ ablation shows a measurable retrieval gain.
 
 Use one primary category per case:
 
+- `retrieval`: gold citations are missing from top-k, ranked too low, or
+  confused with nearby articles/sign IDs.
 - `visual_ambiguity`: the legal target depends on recognizing a sign, panel,
-  lane context, or vehicle class from the image.
-- `weak_question_text`: the question text alone is too generic for reliable
-  text retrieval.
-- `missing_law_context`: the query needs a legal hierarchy or rule family that
-  is not obvious from the words in the question.
-- `similar_article_confusion`: retrieval returns nearby sign/article IDs but
-  misses the exact gold citation.
-- `annotation_mismatch`: the gold citation set is broader or narrower than the
-  evidence a user-facing answer would naturally cite.
-- `output_format_issue`: prediction/parser output is malformed or invalid. This
-  is not a retrieval failure.
+  lane context, vehicle class, or distance/speed text from the image.
+- `legal_context`: the question requires combining sign rules with traffic-law
+  hierarchy, exceptions, or supplementary-panel validity.
+- `reasoning`: the evidence is present but the answer or explanation is wrong.
+- `output_format`: prediction/parser output is malformed or invalid. This is
+  not a retrieval failure.
+- `annotation_data`: the gold citation set appears broader, narrower, or
+  noisier than the evidence a user-facing answer would naturally cite.
+- `adapter_truncation`: adapter output is cut off or cannot produce valid JSON
+  within the configured token budget.
+
+Legacy W3 tags such as `weak_question_text`, `missing_law_context`,
+`similar_article_confusion`, `annotation_mismatch`, and `output_format_issue`
+should be mapped into the W4 categories above when writing the final report.
 
 ## Hard Cases
 
@@ -65,6 +70,30 @@ form.
 | 13 | `train_189` | watchlist | `36/2024/QH15#11` | pending full `retrieval_final` run | `missing_law_context` | This is a legal-priority question about traffic-controller orders, not a traffic-sign definition. |
 | 14 | `train_190` | watchlist | `41`, `F.10` | pending full `retrieval_final` run | `similar_article_confusion` | Similar auxiliary-panel articles `F.10` and `F.11` are easy to swap. |
 | 15 | `train_191` | watchlist | `41`, `F.11` | pending full `retrieval_final` run | `visual_ambiguity` | Yes/No answer requires matching the stated time range against the visual panel. |
+
+## Week 4 Extended Case List
+
+The following rows bring the review log to 30 categorized cases. They are
+selected from the same locked validation split and must be refreshed with
+retrieved citations after running `w4_retrieval_only` or `w4_structured_rag`.
+
+| # | Sample | Status | Gold citations | Retrieved citations | W4 category | Retrieval vs VLM note |
+| ---: | --- | --- | --- | --- | --- | --- |
+| 16 | `train_192` | watchlist | `41`, `F.10`, `F.11` | pending full W4 run | `legal_context` | The answer depends on whether the driver must obey supplementary-panel content, so retrieval must combine panel validity and sign scope. |
+| 17 | `train_193` | watchlist | `22`, `B.3` | pending full W4 run | `retrieval` | Short sign-definition question can retrieve general prohibition content while missing the exact `B.3` sign article. |
+| 18 | `train_2` | watchlist | `26`, `14` | pending full W4 run | `visual_ambiguity` | Requires identifying the prohibited vehicle classes in the image before the VLM can choose the legal interpretation. |
+| 19 | `train_203` | watchlist | `36/2024/QH15#11` | pending full W4 run | `legal_context` | This is about priority among traffic-controller orders, signs, and lights, not the visual sign definition alone. |
+| 20 | `train_204` | watchlist | `36/2024/QH15#9`, `22`, `B.15` | pending full W4 run | `legal_context` | The answer mixes the general road-user compliance duty with a specific prohibition sign. |
+| 21 | `train_205` | watchlist | `22`, `B.27` | pending full W4 run | `visual_ambiguity` | Speed-limit interpretation depends on reading the number and sign class correctly. |
+| 22 | `train_212` | watchlist | `22`, `B.3` | pending full W4 run | `retrieval` | The wording asks which vehicle is banned from turning right; similar prohibition signs can dominate top-k retrieval. |
+| 23 | `train_216` | watchlist | `28`, `C.3` | pending full W4 run | `visual_ambiguity` | Warning-sign meaning and required driver action depend on image recognition rather than question text. |
+| 24 | `train_218` | watchlist | `22`, `B.27`, `F.5` | pending full W4 run | `legal_context` | Speed limit plus supplementary distance/scope panel requires evidence fusion across sign and panel articles. |
+| 25 | `train_221` | watchlist | `28`, `C.4` | pending full W4 run | `visual_ambiguity` | The target warning sign is visually specific; text-only retrieval may drift to nearby warning articles. |
+| 26 | `train_23` | watchlist | `26` | pending full W4 run | `retrieval` | U-turn prohibition wording can be confused with general prohibition articles instead of the exact turning rule. |
+| 27 | `train_230` | watchlist | `37`, `E.14` | pending full W4 run | `annotation_data` | Direction/distance signs may require preserving textual content in the image; gold evidence may be narrower than the natural explanation. |
+| 28 | `train_231` | watchlist | `37`, `E.14` | pending full W4 run | `visual_ambiguity` | The answer depends on reading place names and distances from the road sign image. |
+| 29 | `train_232` | watchlist | `22`, `B.27` | pending full W4 run | `reasoning` | If the speed-limit evidence is retrieved, the model must still infer the maximum speed after passing the sign. |
+| 30 | `train_239` | watchlist | `22`, `B.30` | pending full W4 run | `retrieval` | No-stopping/no-parking signs are visually and legally close; retrieval must distinguish `B.30` from nearby `B.31`/`B.39` articles. |
 
 ## Reporting Rules
 

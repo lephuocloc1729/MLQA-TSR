@@ -322,6 +322,83 @@ exact match, parse status, truncation flag, unsupported-citation flag, latency,
 target answer, and evidence. Treat this row as diagnostic unless it is evaluated
 on the locked split and clearly improves the main base-VLM system.
 
+## Week 4 Final Validation
+
+Week 4 uses one locked validation split for every comparable row:
+`data/processed/val_split.jsonl`, split hash
+`3ffba07cf68cccfdfaf921d34d01903223c96810979cb573c68c67c7b3471448`.
+Every reported number must come from a metrics JSON artifact; rows without an
+artifact stay marked `pending`.
+
+The main product variant is `w4_structured_rag`: base/real VLM, frozen fused
+retrieval, and the structured legal-reasoning prompt. The retrieval-only row is
+for evidence inspection and retrieval Precision/Recall/F2. The QLoRA row is
+diagnostic only unless adapter inference is fully run on the locked split and
+outperforms the main base-VLM system.
+
+| Row | Config | Mock? | Role | Artifact source | Retrieval P/R/F2 | QA accuracy | Invalid / parse / truncated | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Retrieval-only evidence | `configs/experiments/w4_retrieval_only.yaml` | yes | frozen retrieval inspection | pending `data/outputs/experiments/w4_retrieval_only_metrics.json`; current equivalent smoke source: `data/outputs/experiments/retrieval_final_metrics.json` | current smoke: `0.2000 / 0.5333 / 0.3764` | current smoke mock only: `0.2000` | current smoke: invalid `0`; parse/truncated unavailable in older artifact | config ready; rerun full validation before final report |
+| Base VLM + text RAG | `configs/experiments/w4_text_rag_real.yaml` | no | direct legal retrieval baseline | `data/outputs/experiments/w4_text_rag_real_metrics.json` | pending | pending | pending | requires OpenAI-compatible backend |
+| Base VLM + structured legal RAG | `configs/experiments/w4_structured_rag.yaml` | no | main product candidate | `data/outputs/experiments/w4_structured_rag_metrics.json` | pending | pending | pending | requires OpenAI-compatible backend |
+| QLoRA adapter diagnostic | `configs/experiments/w4_adapter_diag.yaml` | no | diagnostic PEFT row, non-final | `data/outputs/experiments/w4_adapter_diag_metrics.json` | oracle/evidence-dependent | pending | pending invalid JSON / truncation / unsupported citation counts | optional GPU/local adapter run |
+
+### Final Validation Commands
+
+Refresh the indexes once:
+
+```bash
+make qdrant-up
+make preprocess
+make index
+make index-examples
+```
+
+Run retrieval-only evidence inspection:
+
+```bash
+python -m src.pipeline --mode benchmark \
+  --config configs/experiments/w4_retrieval_only.yaml
+
+python -m src.evaluate \
+  --config configs/experiments/w4_retrieval_only.yaml \
+  --predictions data/outputs/experiments/w4_retrieval_only.jsonl
+```
+
+Run the main structured legal RAG row when a real backend is available:
+
+```bash
+export OPENAI_COMPATIBLE_BASE_URL="http://localhost:8000/v1"
+export OPENAI_COMPATIBLE_API_KEY="..."
+export OPENAI_COMPATIBLE_MODEL="Qwen/Qwen2.5-VL-3B-Instruct"
+
+python -m src.pipeline --mode benchmark \
+  --config configs/experiments/w4_structured_rag.yaml
+
+python -m src.evaluate \
+  --config configs/experiments/w4_structured_rag.yaml \
+  --predictions data/outputs/experiments/w4_structured_rag.jsonl
+```
+
+Run the adapter diagnostic only on a machine with the local checkpoint:
+
+```bash
+python -m src.adapter_infer \
+  --adapter checkpoints/qlora_adapter \
+  --split val \
+  --max-new-tokens 320 \
+  --output data/outputs/experiments/w4_adapter_diag.jsonl
+
+python -m src.evaluate \
+  --config configs/experiments/w4_adapter_diag.yaml \
+  --predictions data/outputs/experiments/w4_adapter_diag.jsonl
+```
+
+For the final report, copy metrics only from the JSON files named in the table.
+Do not turn pending rows into claimed accuracy. Invalid JSON, truncated output,
+unsupported citations, and valid-but-wrong answers should be counted
+separately.
+
 ## Naming
 
 - `B0`: schema/data sanity baseline. Use tiny or oracle-style predictions to

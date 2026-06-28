@@ -23,6 +23,11 @@ W3_EXPERIMENT_CONFIGS = [
     "configs/experiments/w3_b2_text_rag_real.yaml",
     "configs/experiments/w3_b5_structured_real.yaml",
 ]
+W4_FINAL_VALIDATION_CONFIGS = [
+    "configs/experiments/w4_retrieval_only.yaml",
+    "configs/experiments/w4_text_rag_real.yaml",
+    "configs/experiments/w4_structured_rag.yaml",
+]
 
 
 def citation(article_id: str) -> dict:
@@ -126,6 +131,48 @@ def test_week4_adapter_diagnostic_config_loads_safe_defaults():
         "data/outputs/experiments/w4_adapter_diag.jsonl"
     )
     assert config["model"]["backend"] == "local_qlora_adapter"
+
+
+def test_week4_final_validation_configs_load_and_use_locked_split():
+    configs = [load_config(path) for path in W4_FINAL_VALIDATION_CONFIGS]
+
+    identity = assert_locked_validation_split(configs)
+
+    assert identity["split"] == "val"
+    assert identity["split_path"] == "data/processed/val_split.jsonl"
+    assert [config["experiment"]["name"] for config in configs] == [
+        "w4_retrieval_only",
+        "w4_text_rag_real",
+        "w4_structured_rag",
+    ]
+    assert configs[0]["experiment"]["mock"] is True
+    assert configs[1]["experiment"]["mock"] is False
+    assert configs[2]["experiment"]["mock"] is False
+    assert configs[0]["final_validation"]["role"] == (
+        "retrieval_only_evidence_inspection"
+    )
+    assert configs[2]["final_validation"]["main_product_candidate"] is True
+    assert configs[0]["experiment"]["retrieval_strategy"] == "fusion"
+    assert configs[1]["experiment"]["retrieval_strategy"] == "text"
+    assert configs[2]["experiment"]["retrieval_strategy"] == "fusion"
+    assert configs[2]["experiment"]["prompt_variant"] == "structured_legal_rag"
+    assert configs[2]["retrieval"]["fusion_allow_example_failure"] is False
+    assert configs[2]["model"]["max_new_tokens"] == 512
+    assert benchmark_output_path(configs[2]) == Path(
+        "data/outputs/experiments/w4_structured_rag.jsonl"
+    )
+
+
+def test_week4_adapter_diagnostic_is_non_final_but_uses_locked_validation_paths():
+    config = load_config("configs/experiments/w4_adapter_diag.yaml")
+
+    assert locked_split_identity(config)["split_path"] == (
+        "data/processed/val_split.jsonl"
+    )
+    assert config["experiment"]["mock"] is False
+    assert config["experiment"]["retrieval_strategy"] == "oracle"
+    assert config["adapter_diagnostic"]["status"] == "diagnostic_not_submission_ready"
+    assert config["adapter_diagnostic"]["max_new_tokens"] == 320
 
 
 def test_split_drift_is_rejected_unless_explicitly_overridden():

@@ -250,6 +250,73 @@ def test_invalid_json_and_truncated_predictions_are_counted_as_incorrect():
     assert artifact["parse"]["truncated_sample_ids"] == ["truncated"]
 
 
+def test_wrong_answers_stay_separate_from_parse_and_truncation_failures():
+    records = [
+        {
+            "query": {
+                "id": "valid_wrong",
+                "question_type": "Multiple choice",
+                "answer": "B",
+                "relevant_articles": [citation("22")],
+            },
+            "prediction": {
+                "id": "valid_wrong",
+                "question_type": "Multiple choice",
+                "answer": "A",
+                "citations": [citation("22")],
+                "explanation": "Valid JSON and valid label, but wrong answer.",
+            },
+            "parse": {
+                "status": "success",
+                "success": True,
+                "invalid_json": False,
+                "truncated_output": False,
+            },
+        },
+        {
+            "query": {
+                "id": "adapter_truncated",
+                "question_type": "Yes/No",
+                "answer": "Sai",
+                "relevant_articles": [citation("41")],
+            },
+            "prediction": {
+                "id": "adapter_truncated",
+                "question_type": "Yes/No",
+                "answer": None,
+                "citations": [],
+                "explanation": "Adapter output truncated at max_new_tokens=160",
+                "error": {
+                    "type": "ValueError",
+                    "message": "Adapter output truncated at max_new_tokens=160",
+                },
+            },
+            "parse": {
+                "status": "error",
+                "success": False,
+                "invalid_json": False,
+                "truncated_output": True,
+            },
+        },
+    ]
+
+    artifact = build_evaluation_artifact(records)
+
+    assert artifact["qa"]["accuracy"] == 0.0
+    assert artifact["qa"]["total"] == 2
+    assert artifact["qa"]["prediction_distribution"] == {
+        "A": 1,
+        "__MISSING__": 1,
+    }
+    assert artifact["invalid_prediction_count"] == 1
+    assert artifact["failed_sample_ids"] == ["adapter_truncated"]
+    assert artifact["parse"]["parse_success_count"] == 1
+    assert artifact["parse"]["parse_failure_count"] == 1
+    assert artifact["parse"]["invalid_json_count"] == 0
+    assert artifact["parse"]["truncated_output_count"] == 1
+    assert artifact["parse"]["truncated_sample_ids"] == ["adapter_truncated"]
+
+
 def test_malformed_jsonl_row_is_reported(tmp_path: Path):
     path = tmp_path / "predictions.jsonl"
     path.write_text('{"id": "ok"}\n{bad json\n', encoding="utf-8")
@@ -259,6 +326,13 @@ def test_malformed_jsonl_row_is_reported(tmp_path: Path):
     assert len(records) == 1
     assert invalid_rows[0]["id"] == "line_2"
     assert invalid_rows[0]["reason"].startswith("malformed JSON:")
+
+
+def test_missing_prediction_file_reports_clear_error(tmp_path: Path):
+    path = tmp_path / "missing_predictions.jsonl"
+
+    with pytest.raises(FileNotFoundError, match="Prediction JSONL not found"):
+        read_prediction_jsonl(path)
 
 
 def test_tiny_fixture_evaluates_and_is_serializable():
