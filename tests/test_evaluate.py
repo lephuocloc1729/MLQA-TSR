@@ -108,6 +108,148 @@ def test_pipeline_result_shape_is_supported():
     assert artifact["latency_ms"]["mean"] == 15.0
 
 
+def test_w3_artifact_includes_model_parse_retrieval_and_adapter_metadata():
+    config = {
+        "project": {"seed": 42},
+        "experiment": {
+            "name": "w3_adapter_diag",
+            "label": "W3 adapter diagnostic",
+            "mock": False,
+            "retrieval_strategy": "fusion",
+            "prompt_variant": "structured_legal_rag",
+        },
+        "model": {
+            "backend": "openai_compatible",
+            "name": "Qwen/Qwen2.5-VL-3B-Instruct",
+            "max_new_tokens": 320,
+            "include_image": True,
+        },
+        "retrieval": {"top_k": 5, "example_top_k": 3},
+        "retrieval_freeze": {"version": "retrieval-final-v1"},
+        "adapter_diagnostic": {
+            "metadata_path": "checkpoints/qlora_adapter/adapter_metadata.json",
+            "effective_train_count": 80,
+            "status": "diagnostic",
+        },
+    }
+    records = [
+        {
+            "query": {
+                "id": "s1",
+                "question_type": "Multiple choice",
+                "answer": "B",
+                "relevant_articles": [citation("22")],
+            },
+            "prediction": {
+                "id": "s1",
+                "question_type": "Multiple choice",
+                "answer": "B",
+                "citations": [citation("22")],
+                "explanation": "Dựa trên điều luật.",
+                "raw_response": '{"answer":"B"}',
+            },
+            "predicted_articles": [citation("22")],
+            "model": {
+                "backend": "openai_compatible",
+                "name": "qwen2.5-vl-local",
+                "max_new_tokens": 320,
+                "include_image": True,
+            },
+            "retrieval_config": {
+                "strategy": "fusion",
+                "freeze_version": "retrieval-final-v1",
+                "top_k": 5,
+                "example_top_k": 3,
+            },
+            "parse": {
+                "status": "success",
+                "success": True,
+                "invalid_json": False,
+                "truncated_output": False,
+            },
+        }
+    ]
+
+    artifact = build_evaluation_artifact(records, config=config)
+
+    assert artifact["mock"] is False
+    assert artifact["model"]["backend"] == "openai_compatible"
+    assert artifact["model"]["name"] == "qwen2.5-vl-local"
+    assert artifact["model"]["max_new_tokens"] == 320
+    assert artifact["retrieval_config"]["strategy"] == "fusion"
+    assert artifact["retrieval_config"]["freeze_version"] == "retrieval-final-v1"
+    assert artifact["parse"]["parse_success_count"] == 1
+    assert artifact["parse"]["invalid_json_count"] == 0
+    assert artifact["parse"]["truncated_output_count"] == 0
+    assert artifact["adapter_diagnostic"]["effective_train_count"] == 80
+
+
+def test_invalid_json_and_truncated_predictions_are_counted_as_incorrect():
+    records = [
+        {
+            "query": {
+                "id": "bad_json",
+                "question_type": "Multiple choice",
+                "answer": "B",
+                "relevant_articles": [citation("22")],
+            },
+            "prediction": {
+                "id": "bad_json",
+                "question_type": "Multiple choice",
+                "answer": None,
+                "citations": [],
+                "explanation": "Model error: ValueError: VLM response does not contain a JSON object",
+                "error": {
+                    "type": "ValueError",
+                    "message": "VLM response does not contain a JSON object",
+                },
+            },
+            "parse": {
+                "status": "invalid_json",
+                "success": False,
+                "invalid_json": True,
+                "truncated_output": False,
+            },
+        },
+        {
+            "query": {
+                "id": "truncated",
+                "question_type": "Yes/No",
+                "answer": "Đúng",
+                "relevant_articles": [citation("41")],
+            },
+            "prediction": {
+                "id": "truncated",
+                "question_type": "Yes/No",
+                "answer": None,
+                "citations": [],
+                "explanation": "Model output truncated at max_new_tokens=160",
+                "error": {
+                    "type": "ValueError",
+                    "message": "Model output truncated at max_new_tokens=160",
+                },
+            },
+            "parse": {
+                "status": "error",
+                "success": False,
+                "invalid_json": False,
+                "truncated_output": True,
+            },
+        },
+    ]
+
+    artifact = build_evaluation_artifact(records)
+
+    assert artifact["qa"]["accuracy"] == 0.0
+    assert artifact["qa"]["total"] == 2
+    assert artifact["invalid_prediction_count"] == 2
+    assert artifact["parse"]["parse_failure_count"] == 2
+    assert artifact["parse"]["invalid_json_count"] == 1
+    assert artifact["parse"]["truncated_output_count"] == 1
+    assert artifact["parse"]["invalid_json_sample_ids"] == ["bad_json"]
+    assert artifact["parse"]["truncated_sample_ids"] == ["truncated"]
+
+
 def test_malformed_jsonl_row_is_reported(tmp_path: Path):
     path = tmp_path / "predictions.jsonl"
     path.write_text('{"id": "ok"}\n{bad json\n', encoding="utf-8")

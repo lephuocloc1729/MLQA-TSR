@@ -140,6 +140,9 @@ def test_benchmark_record_uses_fake_retriever_and_fake_vlm(monkeypatch):
     assert record["experiment"]["name"] == "test_release_pipeline"
     assert record["experiment"]["prompt_variant"] == "few_shot_rag"
     assert record["mock"] is True
+    assert record["model"]["name"] == "fake-vlm"
+    assert record["retrieval_config"]["strategy"] == "fusion"
+    assert record["parse"]["success"] is True
     assert record["predicted_articles"] == [{"law_id": LAW_ID, "article_id": "22"}]
     assert record["prompt"]["example_count"] == 1
     assert fake_vlm.calls == [
@@ -217,6 +220,11 @@ def test_non_mock_benchmark_uses_real_vlm_runtime(monkeypatch):
     )
     assert record["mock"] is False
     assert record["experiment"]["mock"] is False
+    assert record["model"]["name"] == "fake-vlm"
+    assert record["model"]["max_new_tokens"] is None
+    assert record["retrieval_config"]["strategy"] == "text"
+    assert record["parse"]["success"] is True
+    assert record["parse"]["invalid_json"] is False
     assert result.prediction.answer == "B"
     assert fake_vlm.calls[-1]["variant"] == "text_rag"
 
@@ -236,4 +244,6 @@ def test_non_mock_model_error_is_recorded_as_invalid_sample(monkeypatch):
     assert record["mock"] is False
     assert record["prediction"]["answer"] is None
     assert record["prediction"]["error"]["type"] == "ValueError"
+    assert record["parse"]["success"] is False
+    assert record["parse"]["invalid_json"] is True
     assert record["diagnostics"][-1]["type"] == "model_error"
