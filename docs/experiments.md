@@ -284,6 +284,19 @@ Report these as training/integration diagnostics only. Do not report the
 inference is fully integrated into the benchmark pipeline and evaluated on the
 locked split with the same artifact contract.
 
+### Week 3 Release Status
+
+| Category | Artifact status | Reportable metric status |
+| --- | --- | --- |
+| Week-2 Text-RAG/Fusion/Few-shot smoke | Metrics JSON exists under `data/outputs/experiments/` | Report as `mock=true` engineering smoke only |
+| `retrieval_final-v1` | `retrieval_final_metrics.json` exists locally | Report retrieval P/R/F2 as mock retrieval smoke, not VLM quality |
+| Real base VLM `W3_B2_text_rag_real` | Config exists; metrics artifact not present in repo state | Do not report real QA accuracy until `w3_b2_text_rag_real_metrics.json` exists |
+| Real structured VLM `W3_B5_structured_real` | Config exists; metrics artifact not present in repo state | Do not report structured-prompt QA accuracy until metrics JSON exists |
+| QLoRA adapter | `adapter_metadata.json` exists locally under ignored `checkpoints/` | Report as diagnostic training evidence only |
+
+The release report is `docs/report.md`. The checkpoint details are in
+`docs/checkpoint-card.md`.
+
 ## Naming
 
 - `B0`: schema/data sanity baseline. Use tiny or oracle-style predictions to

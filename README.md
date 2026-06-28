@@ -184,6 +184,9 @@ export OPENAI_COMPATIBLE_MODEL="Qwen/Qwen2.5-VL-3B-Instruct"
 Run one real Text-RAG sample when the endpoint is available:
 
 ```bash
+make qdrant-up
+make preprocess
+make index
 python -m src.pipeline --mode benchmark \
   --config configs/experiments/w3_b2_text_rag_real.yaml \
   --limit 1
@@ -195,6 +198,43 @@ If credentials or the endpoint are missing, the pipeline fails with a clear
 configuration error before contacting a model. If the model call itself fails,
 the benchmark writes an invalid/error sample instead of inventing a fallback
 answer.
+
+For the week-3 controlled smoke matrix, build both indexes and run:
+
+```bash
+make qdrant-up
+make preprocess
+make index
+make index-examples
+SMOKE_LIMIT=5 make benchmark-w3-real
+```
+
+Generated prediction and metrics files are written to
+`data/outputs/experiments/`, which is intentionally ignored by Git.
+
+## QLoRA Diagnostic Checkpoint
+
+Week 3 includes a reproducible QLoRA training path and a local diagnostic
+adapter under `checkpoints/qlora_adapter/`. Checkpoints and adapter weights are
+not committed.
+
+Validate the training plan on CPU/macOS without loading model weights:
+
+```bash
+make qlora-dry-run
+```
+
+Run a small GPU-only smoke training job:
+
+```bash
+make qlora-smoke20
+```
+
+The current 80-sample adapter is diagnostic, not submission-ready. Its
+checkpoint details and limitations are documented in
+[`docs/checkpoint-card.md`](docs/checkpoint-card.md). The week-3 finding is to
+prioritize real baseline validation, frozen retrieval, structured prompting,
+submission/export, and demo polish before investing in larger QLoRA runs.
 
 If plain `pytest` crashes on macOS because of a local `readline` issue, use
 `make test` or `make ci-test`. Both commands inject a lightweight `readline`
