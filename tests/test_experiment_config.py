@@ -67,6 +67,30 @@ def test_week2_configs_use_same_locked_validation_split():
     assert identity["split_manifest_path"] == "data/processed/split_manifest.json"
 
 
+def test_retrieval_final_config_freezes_locked_validation_fusion_settings():
+    config = load_config("configs/experiments/retrieval_final.yaml")
+    freeze = config["retrieval_freeze"]
+
+    assert freeze["version"] == "retrieval-final-v1"
+    assert freeze["locked_split"] == "data/processed/val_split.jsonl"
+    assert config["data"]["val_split_path"] == freeze["locked_split"]
+    assert config["experiment"]["name"] == "retrieval_final"
+    assert config["experiment"]["retrieval_strategy"] == "fusion"
+    assert config["experiment"]["example_retrieval_mode"] == "fusion"
+    assert config["experiment"]["mock"] is True
+    assert config["retrieval"]["top_k"] == 5
+    assert config["retrieval"]["example_top_k"] == 3
+    assert config["retrieval"]["fusion_allow_example_failure"] is False
+    assert config["retrieval"]["text_weight"] == 0.7
+    assert config["retrieval"]["image_weight"] == 0.3
+    assert set(freeze["stretch_not_included"]) == {
+        "OCR",
+        "cropped-sign detection",
+        "detector-driven sign retrieval",
+    }
+    assert locked_split_identity(config)["split_path"] == freeze["locked_split"]
+
+
 def test_split_drift_is_rejected_unless_explicitly_overridden():
     base = {
         "experiment": {"name": "a", "split": "val"},

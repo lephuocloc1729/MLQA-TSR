@@ -146,6 +146,73 @@ hash `3ffba07cf68cccfdfaf921d34d01903223c96810979cb573c68c67c7b3471448`.
 The QA predictor was deterministic mock logic, so the QA accuracy column only
 confirms evaluator and artifact wiring.
 
+## Week 3 Retrieval Freeze
+
+The frozen retrieval config for week-3 and week-4 comparisons is:
+
+- `configs/experiments/retrieval_final.yaml`
+- version: `retrieval-final-v1`
+- locked split: `data/processed/val_split.jsonl`
+- retrieval strategy: direct LawDB text retrieval plus train-example citation
+  fusion
+- top-k legal evidence: `5`
+- retrieved training examples: `3`
+- example mode: `fusion`
+- text/image example weights: `0.7 / 0.3`
+- direct/example citation fusion weights: `1.0 / 1.0`
+
+This config is intentionally close to `B3_fused_rag`. On the available
+five-sample W2 smoke run, fused retrieval improved retrieval F2 from `0.0769`
+for direct text-only retrieval to `0.3764` for fused retrieval on the same
+locked split and seed. `B4_few_shot_rag` uses the same evidence stack, so it
+does not change the retrieval freeze decision.
+
+| Frozen config | Basis | Retrieval F2 observed | Decision |
+| --- | --- | ---: | --- |
+| `retrieval_final-v1` | `B3_fused_rag` smoke artifact | `0.3764` | Use for W3/W4 model comparisons until a larger locked-validation run proves a better setting. |
+
+The QA values in the W2 table are mock smoke values. They must not be reported
+as real model quality. Use them only to confirm that prediction artifacts,
+latency accounting, and evaluation wiring work.
+
+### Freeze Commands
+
+Build or refresh the required indexes:
+
+```bash
+make qdrant-up
+make preprocess
+make index
+make index-examples
+```
+
+Run the frozen retrieval smoke benchmark and evaluation:
+
+```bash
+python -m src.pipeline --mode benchmark \
+  --config configs/experiments/retrieval_final.yaml \
+  --limit 10
+
+python -m src.evaluate \
+  --config configs/experiments/retrieval_final.yaml \
+  --predictions data/outputs/experiments/retrieval_final.jsonl
+```
+
+For a full validation pass, remove `--limit 10` only after the LawDB and
+train-example Qdrant collections are indexed.
+
+### Error Analysis
+
+Use `docs/error-analysis.md` as the case-level review log. A case is a
+retrieval failure when the gold citation is missing from top-k evidence. A
+case is a VLM reasoning failure only when the required evidence is present but
+the answer or explanation is wrong.
+
+OCR, cropped-sign detection, and detector-driven sign retrieval remain
+documented stretch work. Do not add them as required components unless a
+locked-validation ablation shows measured improvement over
+`retrieval_final-v1`.
+
 ## Naming
 
 - `B0`: schema/data sanity baseline. Use tiny or oracle-style predictions to

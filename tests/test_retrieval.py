@@ -10,8 +10,10 @@ from src.retrieval import (
     evidence_from_payload,
     index_law_articles,
     points_to_evidence,
+    retrieve_fused_evidence,
     retrieve_evidence,
 )
+from src.utils import load_config
 
 
 LAW_ID = "QCVN 41:2024/BGTVT"
@@ -48,6 +50,35 @@ class FakeVectorStore:
         self.query_vector = query_vector
         self.query_top_k = top_k
         return self.points[:top_k]
+
+
+class FakeImageEmbedder:
+    model_name = "fake-image-embedder"
+
+    def __init__(self) -> None:
+        self.paths = []
+
+    def embed_images(self, paths):
+        self.paths.extend([str(path) for path in paths])
+        return [[0.0, 1.0, 0.0] for _ in paths]
+
+
+class FakeExampleVectorStore:
+    def __init__(self, text_points=None, image_points=None) -> None:
+        self.text_points = text_points or []
+        self.image_points = image_points or []
+        self.queries = []
+
+    def recreate_collection(self, text_vector_size: int, image_vector_size: int) -> None:
+        raise AssertionError("retrieve tests should not recreate the example collection")
+
+    def upsert_examples(self, text_embeddings, image_embeddings, payloads, ids) -> None:
+        raise AssertionError("retrieve tests should not upsert examples")
+
+    def query(self, query_vector, vector_name: str, top_k: int):
+        self.queries.append({"vector_name": vector_name, "top_k": top_k})
+        points = self.text_points if vector_name == "text" else self.image_points
+        return points[:top_k]
 
 
 class FakeQdrantClient:
@@ -236,3 +267,73 @@ def test_retrieve_evidence_queries_top_k_unique_text_results():
     assert len(evidence) == 1
     assert evidence[0].uid == f"{LAW_ID}#22"
     assert store.query_top_k == 3
+
+
+def test_retrieval_final_config_produces_deterministic_fused_evidence(tmp_path):
+    path = tmp_path / "law_articles.jsonl"
+    _write_jsonl(
+        path,
+        [
+            _article("22", "Biển báo cấm"),
+            _article("41", "Biển phụ"),
+        ],
+    )
+    config = load_config("configs/experiments/retrieval_final.yaml")
+    config["data"]["processed_law_path"] = str(path)
+    config["data"]["train_image_dir"] = str(tmp_path / "images")
+    config["embeddings"]["text"]["cache_queries"] = False
+
+    direct_store = FakeVectorStore(
+        points=[
+            {
+                "payload": article_payload(_article("22", "Biển báo cấm"), source_path=str(path)),
+                "score": 0.2,
+            }
+        ]
+    )
+    example_payload = {
+        "sample_id": "train_example_1",
+        "image_id": "other_image",
+        "question": "Biển phụ này áp dụng thế nào?",
+        "question_type": "Multiple choice",
+        "choices": {"A": "Một", "B": "Hai", "C": "Ba", "D": "Bốn"},
+        "answer": "B",
+        "relevant_articles": [{"law_id": LAW_ID, "article_id": "41"}],
+        "image_path": str(tmp_path / "images" / "other_image.jpg"),
+        "split": "train",
+    }
+    example_store = FakeExampleVectorStore(
+        text_points=[{"payload": example_payload, "score": 0.5}],
+        image_points=[{"payload": example_payload, "score": 0.7}],
+    )
+
+    result = retrieve_fused_evidence(
+        {
+            "id": "val_1",
+            "image_id": "query_image",
+            "image_path": str(tmp_path / "images" / "query_image.jpg"),
+            "question": "Biển phụ này có hiệu lực ra sao?",
+            "question_type": "Multiple choice",
+            "choices": {"A": "Một", "B": "Hai", "C": "Ba", "D": "Bốn"},
+        },
+        config,
+        text_embedder=FakeEmbedder(),
+        law_vector_store=direct_store,
+        example_text_embedder=FakeEmbedder(),
+        image_embedder=FakeImageEmbedder(),
+        example_vector_store=example_store,
+        top_k=2,
+        example_top_k=1,
+        example_mode="fusion",
+        allow_example_failure=False,
+    )
+
+    assert [item.uid for item in result.evidence] == [f"{LAW_ID}#41", f"{LAW_ID}#22"]
+    assert [item.rank for item in result.evidence] == [1, 2]
+    assert result.evidence[0].retrieval_method == "fusion"
+    assert result.evidence[0].metadata["source_mode"] == "examples"
+    assert result.evidence[0].metadata["example_vote_count"] == 1
+    assert example_store.queries == [
+        {"vector_name": "text", "top_k": 5},
+        {"vector_name": "image", "top_k": 5},
+    ]

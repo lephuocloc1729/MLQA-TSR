@@ -1,0 +1,42 @@
+extends: ../config.yaml
+
+retrieval_freeze:
+  version: retrieval-final-v1
+  decided_at: 2026-06-28
+  owner: M2
+  locked_split: data/processed/val_split.jsonl
+  locked_split_manifest: data/processed/split_manifest.json
+  rationale: >
+    Freeze the week-3/week-4 retrieval stack as fused legal evidence:
+    direct LawDB text retrieval plus leakage-safe train-example citation
+    voting. Week-2 smoke results on the locked validation split showed
+    stronger retrieval F2 for fused retrieval than direct text-only retrieval.
+  stretch_not_included:
+    - OCR
+    - cropped-sign detection
+    - detector-driven sign retrieval
+
+experiment:
+  name: retrieval_final
+  label: Retrieval_Final_V1
+  description: Frozen retrieval config for week-3/week-4 model comparisons.
+  split: val
+  mock: true
+  retrieval_strategy: fusion
+  prompt_variant: text_rag
+  example_retrieval_mode: fusion
+  output_path: data/outputs/experiments/retrieval_final.jsonl
+  metrics_path: data/outputs/experiments/retrieval_final_metrics.json
+
+retrieval:
+  top_k: 5
+  example_top_k: 3
+  example_candidate_multiplier: 5
+  text_weight: 0.7
+  image_weight: 0.3
+  fusion_direct_weight: 1.0
+  fusion_example_vote_weight: 1.0
+  fusion_allow_example_failure: false
+
+prompt:
+  variant: text_rag
