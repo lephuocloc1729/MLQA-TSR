@@ -1,7 +1,12 @@
 import torch
 from PIL import Image
 
-from src.collator import IGNORE_INDEX, SFTDataCollator, format_sft_text
+from src.collator import (
+    IGNORE_INDEX,
+    SFTDataCollator,
+    format_sft_chat_template_texts,
+    format_sft_text,
+)
 
 
 class FakeProcessor:
@@ -29,6 +34,23 @@ class FakeProcessor:
             key: value.tolist() if hasattr(value, "tolist") else value
             for key, value in output.items()
         }
+
+
+class FakeChatTemplateProcessor(FakeProcessor):
+    def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=False):
+        assert tokenize is False
+        rendered = []
+        for message in messages:
+            rendered.append(f"<|im_start|>{message['role']}\n")
+            for item in message["content"]:
+                if item["type"] == "image":
+                    rendered.append("<|vision_start|><|image_pad|><|vision_end|>")
+                elif item["type"] == "text":
+                    rendered.append(item["text"])
+            rendered.append("<|im_end|>\n")
+        if add_generation_prompt:
+            rendered.append("<|im_start|>assistant\n")
+        return "".join(rendered)
 
 
 def write_tiny_image(path):
@@ -91,4 +113,19 @@ def test_collator_can_pass_image_paths_without_loading_images(tmp_path):
 
     batch = collator([sft_record(missing_path)])
 
+    assert batch["image_count"] == 1
+
+
+def test_collator_uses_processor_chat_template_for_multimodal_tokens(tmp_path):
+    image_path = tmp_path / "img.jpg"
+    write_tiny_image(image_path)
+    processor = FakeChatTemplateProcessor()
+    record = sft_record(image_path)
+
+    full_text, prompt_text = format_sft_chat_template_texts(record, processor)
+    batch = SFTDataCollator(processor=processor)([record])
+
+    assert "<|image_pad|>" in full_text
+    assert "<|image_pad|>" in prompt_text
+    assert "<|im_start|>assistant" in prompt_text
     assert batch["image_count"] == 1

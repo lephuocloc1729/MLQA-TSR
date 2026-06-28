@@ -63,6 +63,53 @@ def format_sft_text(record: Mapping[str, Any], assistant_marker: str) -> tuple[s
     return prompt_with_marker + assistant_text, prompt_with_marker
 
 
+def _supports_chat_template(processor: Any) -> bool:
+    return callable(getattr(processor, "apply_chat_template", None))
+
+
+def _image_content(record: Mapping[str, Any]) -> dict[str, str]:
+    image_path = record.get("image_path")
+    if image_path:
+        return {"type": "image", "image": str(image_path)}
+    return {"type": "image"}
+
+
+def format_sft_chat_template_texts(
+    record: Mapping[str, Any],
+    processor: Any,
+) -> tuple[str, str]:
+    """Format SFT text with the VLM processor's native multimodal chat template."""
+
+    prompt_text, assistant_text = split_sft_messages(record)
+    user_message = {
+        "role": "user",
+        "content": [
+            _image_content(record),
+            {"type": "text", "text": prompt_text},
+        ],
+    }
+    assistant_message = {
+        "role": "assistant",
+        "content": [{"type": "text", "text": assistant_text}],
+    }
+
+    full_text = processor.apply_chat_template(
+        [user_message, assistant_message],
+        tokenize=False,
+        add_generation_prompt=False,
+    )
+    prompt_text = processor.apply_chat_template(
+        [user_message],
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+    if not isinstance(full_text, str) or not full_text.strip():
+        raise ValueError("Processor chat template returned empty full text")
+    if not isinstance(prompt_text, str) or not prompt_text.strip():
+        raise ValueError("Processor chat template returned empty prompt text")
+    return full_text, prompt_text
+
+
 def load_rgb_image(path: str | Path) -> Image.Image:
     image_path = Path(path)
     if not image_path.exists():
@@ -123,7 +170,13 @@ class SFTDataCollator:
         full_texts: list[str] = []
         prompt_texts: list[str] = []
         for record in records:
-            full_text, prompt_text = format_sft_text(record, self.assistant_marker)
+            if _supports_chat_template(self.processor):
+                full_text, prompt_text = format_sft_chat_template_texts(
+                    record,
+                    self.processor,
+                )
+            else:
+                full_text, prompt_text = format_sft_text(record, self.assistant_marker)
             full_texts.append(full_text)
             prompt_texts.append(prompt_text)
 
