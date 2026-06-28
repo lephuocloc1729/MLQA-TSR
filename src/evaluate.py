@@ -365,7 +365,11 @@ def evaluate_qa(
 def read_prediction_jsonl(path: str | Path) -> tuple[list[Mapping[str, Any]], list[dict[str, str]]]:
     records: list[Mapping[str, Any]] = []
     invalid_rows: list[dict[str, str]] = []
-    with Path(path).open("r", encoding="utf-8") as file:
+    prediction_path = Path(path)
+    if not prediction_path.exists():
+        raise FileNotFoundError(f"Prediction JSONL not found: {prediction_path}")
+
+    with prediction_path.open("r", encoding="utf-8") as file:
         for line_number, line in enumerate(file, start=1):
             if not line.strip():
                 continue
@@ -675,7 +679,10 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     config = load_config(args.config)
-    records, invalid_rows = read_prediction_jsonl(args.predictions)
+    try:
+        records, invalid_rows = read_prediction_jsonl(args.predictions)
+    except FileNotFoundError as exc:
+        raise SystemExit(f"ERROR: {exc}") from None
     artifact = build_evaluation_artifact(
         records,
         invalid_rows=invalid_rows,
