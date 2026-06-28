@@ -97,10 +97,12 @@ make qdrant-up
 make qdrant-down
 ```
 
-## Streamlit Evidence Inspector
+## Final Streamlit Demo
 
-Week 2 includes a lightweight retrieval inspection demo. It is meant for
-debugging and weekly reporting, not as the final polished app.
+Week 4 includes a final evidence-grounded Streamlit demo for defense. It can
+run without a live GPU/API by using retrieval-only mode or cached prediction
+display. Live VLM mode is optional and appears only when the configured backend
+credentials are available.
 
 Prepare local data and indexes:
 
@@ -121,14 +123,21 @@ python -m src.retrieval --mode index-examples --split train
 Start the demo:
 
 ```bash
-python -m streamlit run app/streamlit_app.py
+bash scripts/demo.sh
 ```
 
-The app supports selecting a validation sample, viewing the image/question,
-retrieving top-k legal evidence, copying citation IDs, and optionally showing a
-mock prediction panel. It does not require model/API credentials for retrieval
-inspection. If no VLM backend is configured, it stays in retrieval-only mode and
-shows a clear message.
+The app supports:
+
+- retrieval-only evidence inspection;
+- cached prediction display from JSONL artifacts under `data/outputs/`;
+- optional live VLM answering when backend credentials are configured;
+- curated success/failure samples for presentation;
+- visible citations, evidence scores, answer, explanation, latency, and a
+  research/legal disclaimer.
+
+For cached prediction mode, point the sidebar to a JSONL artifact such as
+`data/outputs/experiments/w4_structured_rag.jsonl`. If no live VLM backend is
+configured, the demo stays in retrieval-only mode and shows a clear message.
 
 ## Week 2 Retrieval And Few-Shot Release
 

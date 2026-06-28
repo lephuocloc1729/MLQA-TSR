@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from src.data_utils import load_split_samples
+from src.evaluate import extract_sample_id, read_prediction_jsonl
 from src.prompts import PromptVariant, normalize_prompt_variant
 from src.retrieval import (
     ImageEmbedder,
@@ -30,6 +31,11 @@ from src.vlm import LegalQAVLM
 EXPERIMENT_SCHEMA_VERSION = "w2-ablation-v1"
 DEFAULT_EXPERIMENT_DIR = "data/outputs/experiments"
 DEMO_SCHEMA_VERSION = "demo-inspection-v1"
+DEMO_DISCLAIMER = (
+    "Demo phục vụ nghiên cứu/giáo dục và hỗ trợ tra cứu. Kết quả không phải "
+    "tư vấn pháp lý chính thức; hãy đối chiếu văn bản pháp luật gốc khi sử dụng."
+)
+DEMO_PREDICTION_MODES = {"retrieval_only", "cached", "live", "mock"}
 
 
 class BenchmarkRuntime:
@@ -135,6 +141,32 @@ def load_benchmark_samples(config: Mapping[str, Any], limit: int | None = None) 
 
 def demo_config(config: Mapping[str, Any]) -> dict[str, Any]:
     return dict(config.get("demo", {}))
+
+
+def normalize_demo_prediction_mode(
+    prediction_mode: str | None = None,
+    include_prediction: bool = False,
+    use_mock_prediction: bool = False,
+) -> str:
+    if prediction_mode is None:
+        if not include_prediction:
+            return "retrieval_only"
+        return "mock" if use_mock_prediction else "live"
+
+    mode = str(prediction_mode).strip().lower().replace("-", "_")
+    aliases = {
+        "retrieval": "retrieval_only",
+        "none": "retrieval_only",
+        "cached_prediction": "cached",
+        "live_vlm": "live",
+        "mock_prediction": "mock",
+    }
+    mode = aliases.get(mode, mode)
+    if mode not in DEMO_PREDICTION_MODES:
+        raise ValueError(
+            f"prediction_mode must be one of {sorted(DEMO_PREDICTION_MODES)}"
+        )
+    return mode
 
 
 def load_demo_samples(config: Mapping[str, Any], split: str = "val") -> list[dict[str, Any]]:
@@ -275,35 +307,111 @@ def demo_model_status(
     config: Mapping[str, Any],
     include_prediction: bool = False,
     use_mock_prediction: bool = False,
+    prediction_mode: str | None = None,
+    cached_predictions_path: str | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Describe whether the demo can produce an answer without exposing secrets."""
     environ = environ or os.environ
+    mode = normalize_demo_prediction_mode(
+        prediction_mode,
+        include_prediction=include_prediction,
+        use_mock_prediction=use_mock_prediction,
+    )
     config_demo = demo_config(config)
-    api_key_env = str(config_demo.get("vlm_api_key_env", "OPENAI_API_KEY"))
 
-    if not include_prediction:
+    if mode == "retrieval_only":
         return {
             "available": False,
             "mode": "retrieval_only",
+            "label": "Retrieval-only",
             "reason": "Prediction disabled; showing retrieval evidence only.",
         }
-    if use_mock_prediction:
+    if mode == "cached":
+        if not cached_predictions_path:
+            return {
+                "available": False,
+                "mode": "cached_prediction",
+                "label": "Cached prediction",
+                "reason": "No cached prediction artifact was provided.",
+            }
+        if not Path(cached_predictions_path).exists():
+            return {
+                "available": False,
+                "mode": "cached_prediction",
+                "label": "Cached prediction",
+                "reason": f"Cached prediction artifact not found: {cached_predictions_path}.",
+            }
+        return {
+            "available": True,
+            "mode": "cached_prediction",
+            "label": "Cached prediction",
+            "reason": "Showing a saved model/pipeline prediction artifact.",
+            "artifact_path": str(Path(cached_predictions_path)),
+        }
+    if mode == "mock":
         return {
             "available": True,
             "mode": "mock_prediction",
+            "label": "Mock smoke",
             "reason": "Using deterministic mock prediction for UI smoke testing.",
         }
-    if config_demo.get("enable_vlm") and not environ.get(api_key_env):
+
+    if config_demo.get("enable_vlm"):
+        api_key_env = str(config_demo.get("vlm_api_key_env", "OPENAI_API_KEY"))
+        if not environ.get(api_key_env):
+            return {
+                "available": False,
+                "mode": "retrieval_only",
+                "label": "Retrieval-only",
+                "reason": f"Missing VLM credential environment variable: {api_key_env}.",
+            }
+
+    model_config = config.get("model", {})
+    backend = str(model_config.get("backend", "none")).strip().lower()
+    if backend in {"", "none", "mock", "fake"}:
         return {
             "available": False,
             "mode": "retrieval_only",
-            "reason": f"Missing VLM credential environment variable: {api_key_env}.",
+            "label": "Retrieval-only",
+            "reason": "No live VLM backend is configured.",
         }
+
+    if backend in {"openai_compatible", "openai-compatible", "openai"}:
+        api_key_env = str(model_config.get("api_key_env", "OPENAI_COMPATIBLE_API_KEY"))
+        base_url_env = str(
+            model_config.get("base_url_env", "OPENAI_COMPATIBLE_BASE_URL")
+        )
+        api_key = environ.get(api_key_env) or model_config.get("api_key")
+        base_url = environ.get(base_url_env) or model_config.get("base_url")
+        missing = []
+        if not api_key:
+            missing.append(api_key_env)
+        if not base_url:
+            missing.append(base_url_env)
+        if missing:
+            return {
+                "available": False,
+                "mode": "retrieval_only",
+                "label": "Retrieval-only",
+                "reason": "Missing VLM backend environment variable(s): "
+                + ", ".join(missing)
+                + ".",
+            }
+        return {
+            "available": True,
+            "mode": "live_vlm",
+            "label": "Live VLM",
+            "reason": "Live VLM backend is configured.",
+            "backend": backend,
+            "model": model_config.get("name") or model_config.get("name_env"),
+        }
+
     return {
         "available": False,
         "mode": "retrieval_only",
-        "reason": "No VLM backend is configured in this demo build.",
+        "label": "Retrieval-only",
+        "reason": f"Unsupported live VLM backend for demo: {backend}.",
     }
 
 
@@ -344,16 +452,101 @@ def query_to_demo_sample(query: Query) -> dict[str, Any]:
     }
 
 
-def prediction_to_demo_item(prediction: Prediction | None) -> dict[str, Any] | None:
+def safe_prediction_citations(citations: Any) -> list[dict[str, str]]:
+    if not isinstance(citations, list):
+        return []
+    safe: list[dict[str, str]] = []
+    for citation in citations:
+        if isinstance(citation, Citation):
+            safe.append(citation_dict(citation))
+        elif isinstance(citation, Mapping):
+            law_id = citation.get("law_id")
+            article_id = citation.get("article_id")
+            if law_id and article_id:
+                safe.append({"law_id": str(law_id), "article_id": str(article_id)})
+    return safe
+
+
+def prediction_to_demo_item(
+    prediction: Prediction | Mapping[str, Any] | None,
+    source: str | None = None,
+    parse: Mapping[str, Any] | None = None,
+) -> dict[str, Any] | None:
     if prediction is None:
         return None
+    if isinstance(prediction, Mapping):
+        error = prediction.get("error") if isinstance(prediction.get("error"), Mapping) else {}
+        return {
+            "answer": prediction.get("answer"),
+            "citations": safe_prediction_citations(prediction.get("citations")),
+            "explanation": prediction.get("explanation") or "",
+            "confidence": prediction.get("confidence"),
+            "abstained": bool(prediction.get("abstained", False)),
+            "source": source,
+            "parse": dict(parse or {}),
+            "error": dict(error or {}),
+        }
     return {
         "answer": prediction.answer,
         "citations": [citation_dict(citation) for citation in prediction.citations],
         "explanation": prediction.explanation,
         "confidence": prediction.confidence,
         "abstained": prediction.abstained,
+        "source": source,
+        "parse": dict(parse or {}),
+        "error": {},
     }
+
+
+def total_latency_ms(timings_ms: Mapping[str, Any] | None) -> float | None:
+    if not isinstance(timings_ms, Mapping):
+        return None
+    values = [
+        float(value)
+        for value in timings_ms.values()
+        if isinstance(value, int | float) and value >= 0
+    ]
+    return sum(values) if values else None
+
+
+def load_cached_prediction_index(path: str | Path) -> dict[str, Mapping[str, Any]]:
+    records, invalid_rows = read_prediction_jsonl(path)
+    if invalid_rows:
+        raise ValueError(f"Cached prediction artifact has invalid rows: {invalid_rows}")
+
+    index: dict[str, Mapping[str, Any]] = {}
+    duplicates: list[str] = []
+    for row_index, record in enumerate(records):
+        sample_id = extract_sample_id(record, row_index)
+        if sample_id in index:
+            duplicates.append(sample_id)
+            continue
+        index[sample_id] = record
+    if duplicates:
+        raise ValueError(f"Cached prediction artifact has duplicate sample IDs: {duplicates}")
+    return index
+
+
+def cached_prediction_demo_item(record: Mapping[str, Any]) -> dict[str, Any] | None:
+    prediction = record.get("prediction")
+    if isinstance(prediction, Mapping):
+        return prediction_to_demo_item(
+            prediction,
+            source="cached_prediction",
+            parse=record.get("parse") if isinstance(record.get("parse"), Mapping) else {},
+        )
+    if "predict" in record:
+        return prediction_to_demo_item(
+            {
+                "answer": record.get("predict"),
+                "citations": record.get("predicted_articles", []),
+                "explanation": record.get("answer_explanation", ""),
+                "confidence": None,
+                "abstained": False,
+            },
+            source="cached_prediction",
+        )
+    return None
 
 
 def make_demo_inspection_record(
@@ -362,13 +555,18 @@ def make_demo_inspection_record(
     retrieval_strategy_name: str,
     top_k: int,
     diagnostics: list[dict[str, Any]] | None = None,
-    prediction: Prediction | None = None,
+    prediction: Prediction | Mapping[str, Any] | None = None,
     model_status: Mapping[str, Any] | None = None,
+    timings_ms: Mapping[str, Any] | None = None,
+    prediction_source: str | None = None,
 ) -> dict[str, Any]:
     query = sample if isinstance(sample, Query) else Query.model_validate(sample)
     image_path = query.image_path
+    timings = dict(timings_ms or {})
+    parse = prediction.get("parse", {}) if isinstance(prediction, Mapping) else {}
     return {
         "schema_version": DEMO_SCHEMA_VERSION,
+        "disclaimer": DEMO_DISCLAIMER,
         "sample": query_to_demo_sample(query),
         "local_image_path": image_path,
         "retrieval": {
@@ -379,7 +577,15 @@ def make_demo_inspection_record(
             "citation_ids": [item.uid for item in evidence],
             "diagnostics": list(diagnostics or []),
         },
-        "prediction": prediction_to_demo_item(prediction),
+        "prediction": prediction_to_demo_item(
+            prediction,
+            source=prediction_source,
+            parse=parse if isinstance(parse, Mapping) else {},
+        ),
+        "latency_ms": {
+            **timings,
+            "total": total_latency_ms(timings),
+        },
         "model": dict(model_status or {}),
     }
 
@@ -460,11 +666,36 @@ def build_demo_inspection(
     retrieval_strategy_name: str = "text",
     include_prediction: bool = False,
     use_mock_prediction: bool = False,
+    prediction_mode: str | None = None,
+    cached_predictions_path: str | None = None,
+    cached_predictions: Mapping[str, Mapping[str, Any]] | None = None,
+    environ: Mapping[str, str] | None = None,
     runtime: BenchmarkRuntime | None = None,
 ) -> dict[str, Any]:
-    runtime = runtime or BenchmarkRuntime(config)
     sample = load_demo_sample_by_id(config, sample_id=sample_id, split=split)
     query = Query.model_validate(sample)
+    mode = normalize_demo_prediction_mode(
+        prediction_mode,
+        include_prediction=include_prediction,
+        use_mock_prediction=use_mock_prediction,
+    )
+    model_status = demo_model_status(
+        config,
+        include_prediction=include_prediction,
+        use_mock_prediction=use_mock_prediction,
+        prediction_mode=mode,
+        cached_predictions_path=cached_predictions_path,
+        environ=environ,
+    )
+    if runtime is None:
+        runtime_config = dict(config)
+        if not (mode == "live" and model_status.get("available")):
+            runtime_config["model"] = {
+                **dict(config.get("model", {})),
+                "backend": "none",
+            }
+        runtime = BenchmarkRuntime(runtime_config)
+
     local_config = dict(config)
     local_config["experiment"] = {
         **experiment_config(config),
@@ -475,17 +706,65 @@ def build_demo_inspection(
         local_config["retrieval"]["top_k"] = int(top_k)
     resolved_top_k = int(local_config.get("retrieval", {}).get("top_k", 5))
 
+    timings_ms: dict[str, float] = {}
+    retrieval_start = time.perf_counter()
     evidence, _, diagnostics = retrieve_for_sample(sample, local_config, runtime)
-    model_status = demo_model_status(
-        config,
-        include_prediction=include_prediction,
-        use_mock_prediction=use_mock_prediction,
-    )
-    prediction = (
-        mock_prediction(query, evidence)
-        if include_prediction and use_mock_prediction
-        else None
-    )
+    timings_ms["retrieval"] = (time.perf_counter() - retrieval_start) * 1000
+    prediction: Prediction | Mapping[str, Any] | None = None
+    prediction_source: str | None = None
+
+    if mode == "mock":
+        generation_start = time.perf_counter()
+        prediction = mock_prediction(query, evidence)
+        timings_ms["generation"] = (time.perf_counter() - generation_start) * 1000
+        prediction_source = "mock_prediction"
+    elif mode == "cached" and model_status.get("available"):
+        cache = (
+            dict(cached_predictions)
+            if cached_predictions is not None
+            else load_cached_prediction_index(str(cached_predictions_path))
+        )
+        cached_record = cache.get(query.id or "")
+        if cached_record is None:
+            model_status = {
+                **model_status,
+                "available": False,
+                "reason": f"Cached artifact has no prediction for sample {query.id!r}.",
+            }
+        else:
+            prediction = cached_prediction_demo_item(cached_record)
+            timings = cached_record.get("timings_ms")
+            if isinstance(timings, Mapping):
+                for key, value in timings.items():
+                    if isinstance(value, int | float):
+                        timings_ms[f"cached_{key}"] = float(value)
+            prediction_source = "cached_prediction"
+    elif mode == "live" and model_status.get("available"):
+        generation_start = time.perf_counter()
+        try:
+            prediction = runtime.vlm.answer(query, evidence)
+            prediction_source = "live_vlm"
+        except Exception as exc:
+            prediction = {
+                "answer": None,
+                "citations": [],
+                "explanation": "Live model call failed; showing retrieval evidence only.",
+                "confidence": 0.0,
+                "abstained": True,
+                "error": {
+                    "type": type(exc).__name__,
+                    "message": str(exc),
+                },
+                "parse": parse_error_metadata(exc),
+            }
+            model_status = {
+                **model_status,
+                "available": False,
+                "reason": f"Live model call failed: {type(exc).__name__}.",
+            }
+            prediction_source = "live_vlm_error"
+        timings_ms["generation"] = (time.perf_counter() - generation_start) * 1000
+
     return make_demo_inspection_record(
         sample=query,
         evidence=evidence,
@@ -494,6 +773,8 @@ def build_demo_inspection(
         diagnostics=diagnostics,
         prediction=prediction,
         model_status=model_status,
+        timings_ms=timings_ms,
+        prediction_source=prediction_source,
     )
 
 
