@@ -1,0 +1,29 @@
+extends: ../config.yaml
+
+experiment:
+  name: w4_adapter_diag
+  label: W4_adapter_diagnostic
+  description: Diagnostic QLoRA adapter inference over the locked validation split.
+  split: val
+  mock: false
+  retrieval_strategy: oracle
+  prompt_variant: text_rag
+  output_path: data/outputs/experiments/w4_adapter_diag.jsonl
+  metrics_path: data/outputs/experiments/w4_adapter_diag_metrics.json
+
+adapter_diagnostic:
+  adapter_path: checkpoints/qlora_adapter
+  split: val
+  max_new_tokens: 320
+  output_path: data/outputs/experiments/w4_adapter_diag.jsonl
+  sft_val_path: data/processed/sft_val.jsonl
+  status: diagnostic_not_submission_ready
+
+model:
+  backend: local_qlora_adapter
+  name: Qwen/Qwen2.5-VL-3B-Instruct
+  max_new_tokens: 320
+  include_image: true
+
+prompt:
+  variant: text_rag

@@ -114,6 +114,20 @@ def test_week3_real_experiment_configs_load_and_use_locked_split():
     assert configs[0]["model"]["max_new_tokens"] == 512
 
 
+def test_week4_adapter_diagnostic_config_loads_safe_defaults():
+    config = load_config("configs/experiments/w4_adapter_diag.yaml")
+
+    assert config["experiment"]["name"] == "w4_adapter_diag"
+    assert config["experiment"]["mock"] is False
+    assert config["adapter_diagnostic"]["adapter_path"] == "checkpoints/qlora_adapter"
+    assert config["adapter_diagnostic"]["split"] == "val"
+    assert config["adapter_diagnostic"]["max_new_tokens"] == 320
+    assert config["adapter_diagnostic"]["output_path"] == (
+        "data/outputs/experiments/w4_adapter_diag.jsonl"
+    )
+    assert config["model"]["backend"] == "local_qlora_adapter"
+
+
 def test_split_drift_is_rejected_unless_explicitly_overridden():
     base = {
         "experiment": {"name": "a", "split": "val"},

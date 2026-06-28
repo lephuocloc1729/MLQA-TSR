@@ -297,6 +297,31 @@ locked split with the same artifact contract.
 The release report is `docs/report.md`. The checkpoint details are in
 `docs/checkpoint-card.md`.
 
+## Week 4 Adapter Diagnostic
+
+`configs/experiments/w4_adapter_diag.yaml` defines the local QLoRA adapter
+diagnostic run. It defaults to `checkpoints/qlora_adapter`, the locked
+validation split, and `max_new_tokens=320` because lower token limits produced
+truncated JSON during week-3 smoke checks.
+
+```bash
+python -m src.adapter_infer \
+  --adapter checkpoints/qlora_adapter \
+  --split val \
+  --limit 5 \
+  --max-new-tokens 320 \
+  --output data/outputs/experiments/w4_adapter_diag.jsonl
+
+python -m src.evaluate \
+  --config configs/experiments/w4_adapter_diag.yaml \
+  --predictions data/outputs/experiments/w4_adapter_diag.jsonl
+```
+
+The JSONL rows include adapter metadata hash, raw response, parsed answer,
+exact match, parse status, truncation flag, unsupported-citation flag, latency,
+target answer, and evidence. Treat this row as diagnostic unless it is evaluated
+on the locked split and clearly improves the main base-VLM system.
+
 ## Naming
 
 - `B0`: schema/data sanity baseline. Use tiny or oracle-style predictions to

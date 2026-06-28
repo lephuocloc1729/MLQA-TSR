@@ -1,4 +1,4 @@
-.PHONY: help setup check-data qdrant-up qdrant-down preprocess index index-examples index-week2 retrieve benchmark-b2 benchmark-b3 benchmark-b4 benchmark-week2-smoke benchmark-w3-real qlora-dry-run qlora-smoke20 task1 task2 assistant eval demo ci-test test verify clean
+.PHONY: help setup check-data qdrant-up qdrant-down preprocess index index-examples index-week2 retrieve benchmark-b2 benchmark-b3 benchmark-b4 benchmark-week2-smoke benchmark-w3-real adapter-diagnostic qlora-dry-run qlora-smoke20 task1 task2 assistant eval demo ci-test test verify clean
 
 SMOKE_LIMIT ?= 5
 
@@ -24,6 +24,7 @@ help:
 	@echo "  make benchmark-b3     Run B3 fused-RAG smoke benchmark"
 	@echo "  make benchmark-b4     Run B4 few-shot-RAG smoke benchmark"
 	@echo "  make benchmark-w3-real  Run W3 non-mock configs with SMOKE_LIMIT"
+	@echo "  make adapter-diagnostic  Run W4 QLoRA adapter diagnostic with SMOKE_LIMIT"
 	@echo "  make qlora-dry-run    Validate QLoRA config without loading model weights"
 	@echo "  make qlora-smoke20    GPU-only 20-sample QLoRA smoke command"
 	@echo "  make demo             Start the Streamlit demo"
@@ -81,6 +82,9 @@ benchmark-week2-smoke: benchmark-b2 benchmark-b3 benchmark-b4
 
 benchmark-w3-real:
 	bash scripts/evaluate.sh run-w3-real $(SMOKE_LIMIT)
+
+adapter-diagnostic:
+	bash scripts/evaluate.sh adapter-diagnostic $(SMOKE_LIMIT)
 
 qlora-dry-run:
 	python -m src.train_qlora --config configs/qlora.yaml --dry-run
