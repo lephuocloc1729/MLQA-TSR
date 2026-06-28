@@ -49,6 +49,9 @@ print(config.get("adapter_diagnostic", {}).get("output_path", "data/outputs/expe
 PY
 )"
   python -m src.evaluate --config "$config" --predictions "$output_path"
+elif [ "$1" = "submission" ]; then
+  shift
+  python -m src.submission "$@"
 else
   python -m src.evaluate "$@"
 fi
