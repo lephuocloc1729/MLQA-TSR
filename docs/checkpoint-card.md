@@ -97,6 +97,23 @@ The attempted 300-sample run uses the default `training.max_samples: 300` in
 Adapter inference is diagnostic only unless it is wired into the same
 benchmark artifact contract as the base VLM runs.
 
+Run a 3-5 sample diagnostic with the safer `max_new_tokens=320` setting:
+
+```bash
+python -m src.adapter_infer \
+  --adapter checkpoints/qlora_adapter \
+  --split val \
+  --limit 5 \
+  --max-new-tokens 320 \
+  --output data/outputs/experiments/w4_adapter_diag.jsonl
+```
+
+The equivalent helper is:
+
+```bash
+SMOKE_LIMIT=5 make adapter-diagnostic
+```
+
 Recorded validation-smoke observations:
 
 - `max_new_tokens=160`: many outputs were truncated and could not be parsed

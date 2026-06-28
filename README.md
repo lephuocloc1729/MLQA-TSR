@@ -230,6 +230,12 @@ Run a small GPU-only smoke training job:
 make qlora-smoke20
 ```
 
+Run a local adapter diagnostic over a few validation samples:
+
+```bash
+SMOKE_LIMIT=5 make adapter-diagnostic
+```
+
 The current 80-sample adapter is diagnostic, not submission-ready. Its
 checkpoint details and limitations are documented in
 [`docs/checkpoint-card.md`](docs/checkpoint-card.md). The week-3 finding is to

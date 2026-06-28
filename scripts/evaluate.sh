@@ -36,6 +36,19 @@ elif [ "$1" = "run-w3-real" ]; then
   do
     "$0" run-experiment "$config" "$limit"
   done
+elif [ "$1" = "adapter-diagnostic" ]; then
+  shift
+  limit="${1:-5}"
+  config="${2:-configs/experiments/w4_adapter_diag.yaml}"
+  python -m src.adapter_infer --config "$config" --limit "$limit"
+  output_path="$(python - "$config" <<'PY'
+import sys
+from src.utils import load_config
+config = load_config(sys.argv[1])
+print(config.get("adapter_diagnostic", {}).get("output_path", "data/outputs/experiments/w4_adapter_diag.jsonl"))
+PY
+)"
+  python -m src.evaluate --config "$config" --predictions "$output_path"
 else
   python -m src.evaluate "$@"
 fi
