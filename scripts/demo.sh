@@ -1,2 +1,4 @@
 #!/bin/bash
-streamlit run app/streamlit_app.py
+set -euo pipefail
+
+python -m streamlit run app/streamlit_app.py "$@"

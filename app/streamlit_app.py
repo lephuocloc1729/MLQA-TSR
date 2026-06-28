@@ -7,13 +7,25 @@ import streamlit as st
 
 from src.pipeline import (
     BenchmarkRuntime,
+    DEMO_DISCLAIMER,
     build_demo_inspection,
+    demo_model_status,
+    load_cached_prediction_index,
     load_demo_samples,
+    normalize_demo_prediction_mode,
 )
 from src.utils import load_config
 
 
 DEFAULT_CONFIG_PATH = "configs/config.yaml"
+DEFAULT_CACHED_PREDICTIONS = "data/outputs/experiments/w4_structured_rag.jsonl"
+CURATED_CASES = [
+    ("train_1", "Success-style: general prohibition article appears in retrieved evidence."),
+    ("train_116", "Failure-style: visual ambiguity, danger/warning sign family."),
+    ("train_134", "Hard case: no-stopping/no-parking sign confusion."),
+    ("train_203", "Legal-context case: traffic-controller order priority."),
+    ("train_239", "Hard case: visually similar parking/stopping signs."),
+]
 
 
 @st.cache_data(show_spinner=False)
@@ -26,9 +38,21 @@ def cached_samples(config_path: str, split: str) -> list[dict[str, Any]]:
     return load_demo_samples(cached_config(config_path), split=split)
 
 
+@st.cache_data(show_spinner=False)
+def cached_prediction_index(path: str) -> dict[str, Any]:
+    return load_cached_prediction_index(path)
+
+
 @st.cache_resource(show_spinner=False)
-def cached_runtime(config_path: str) -> BenchmarkRuntime:
-    return BenchmarkRuntime(cached_config(config_path))
+def cached_runtime(config_path: str, use_live_backend: bool) -> BenchmarkRuntime:
+    config = cached_config(config_path)
+    runtime_config = dict(config)
+    if not use_live_backend:
+        runtime_config["model"] = {
+            **dict(config.get("model", {})),
+            "backend": "none",
+        }
+    return BenchmarkRuntime(runtime_config)
 
 
 def format_sample_option(sample: dict[str, Any]) -> str:
@@ -82,7 +106,7 @@ def render_evidence(result: dict[str, Any]) -> None:
         st.text_area(
             "Citation IDs for copy/debug",
             "\n".join(citation_ids),
-            height=120,
+            height=100,
         )
     else:
         st.warning("No legal evidence was retrieved.")
@@ -97,9 +121,7 @@ def render_evidence(result: dict[str, Any]) -> None:
         )
         with st.expander(header, expanded=item.get("rank") == 1):
             st.markdown(f"**Title:** {title}")
-            st.markdown(
-                f"**Citation:** `{item['law_id']}#{item['article_id']}`"
-            )
+            st.markdown(f"**Citation:** `{item['law_id']}#{item['article_id']}`")
             st.markdown("**Content**")
             st.write(item["content"])
 
@@ -110,41 +132,102 @@ def render_evidence(result: dict[str, Any]) -> None:
 
 
 def render_prediction(result: dict[str, Any]) -> None:
-    st.subheader("Model Answer")
+    st.subheader("Answer")
     model = result.get("model") or {}
-    st.caption(f"Mode: `{model.get('mode', 'unknown')}`")
+    st.caption(
+        f"Output mode: `{model.get('label') or model.get('mode', 'unknown')}`"
+    )
 
     prediction = result.get("prediction")
     if not prediction:
-        st.info(model.get("reason") or "Prediction is not available in this run.")
+        st.info(model.get("reason") or "Prediction is not available in this mode.")
         return
 
-    st.success(f"Answer: {prediction['answer']}")
+    answer = prediction.get("answer")
+    if answer:
+        st.success(f"Answer: {answer}")
+    else:
+        st.warning("No valid answer was produced for this sample.")
+
     confidence = prediction.get("confidence")
     if confidence is not None:
         st.write(f"Confidence: `{confidence}`")
-    st.write("Explanation:")
-    st.write(prediction["explanation"])
+
+    explanation = prediction.get("explanation")
+    if explanation:
+        st.markdown("**Explanation**")
+        st.write(explanation)
 
     citations = prediction.get("citations") or []
     if citations:
-        st.write("Citations:")
+        st.markdown("**Citations**")
         for citation in citations:
             st.code(f"{citation['law_id']}#{citation['article_id']}")
+
+    parse = prediction.get("parse") or {}
+    if parse:
+        st.markdown("**Parse status**")
+        st.json(parse)
+
+    error = prediction.get("error") or {}
+    if error:
+        st.error(f"{error.get('type', 'Error')}: {error.get('message', '')}")
+
     if prediction.get("abstained"):
         st.warning("The model abstained.")
 
 
+def render_latency(result: dict[str, Any]) -> None:
+    latency = result.get("latency_ms") or {}
+    if not latency:
+        return
+    st.subheader("Latency")
+    cols = st.columns(3)
+    for col, key in zip(cols, ["retrieval", "generation", "total"], strict=False):
+        value = latency.get(key)
+        label = key.replace("_", " ").title()
+        col.metric(label, f"{value:.1f} ms" if isinstance(value, int | float) else "N/A")
+    with st.expander("Latency details", expanded=False):
+        st.json(latency)
+
+
+def select_curated_sample(samples: list[dict[str, Any]]) -> dict[str, Any] | None:
+    sample_by_id = {sample.get("id"): sample for sample in samples}
+    available = [
+        (sample_id, note)
+        for sample_id, note in CURATED_CASES
+        if sample_id in sample_by_id
+    ]
+    if not available:
+        return None
+    label = st.selectbox(
+        "Curated presentation case",
+        available,
+        format_func=lambda item: f"{item[0]} - {item[1]}",
+    )
+    return sample_by_id[label[0]]
+
+
+def mode_to_internal(label: str) -> str:
+    return {
+        "Retrieval-only": "retrieval_only",
+        "Cached prediction": "cached",
+        "Live VLM": "live",
+        "Mock smoke": "mock",
+    }[label]
+
+
 def main() -> None:
     st.set_page_config(
-        page_title="Traffic Legal VLM Evidence Inspector",
+        page_title="Traffic Legal VLM Final Demo",
         layout="wide",
     )
-    st.title("Traffic Legal VLM - Evidence Inspector")
+    st.title("Traffic Legal VLM - Final Evidence-Grounded Demo")
     st.caption(
-        "Week-2 debug demo for sample selection, image viewing, legal evidence "
-        "inspection, and optional mock answer display."
+        "Defense-ready demo for retrieval inspection, cached prediction display, "
+        "and optional live VLM answering."
     )
+    st.warning(DEMO_DISCLAIMER)
 
     with st.sidebar:
         st.header("Demo Settings")
@@ -157,14 +240,21 @@ def main() -> None:
             help="Fusion requires the training example index to exist in Qdrant.",
         )
         top_k = st.slider("Top-k legal evidence", 1, 10, 5)
-        include_prediction = st.checkbox("Show prediction panel", value=False)
-        use_mock_prediction = st.checkbox(
-            "Use mock prediction",
-            value=False,
-            help="Smoke-test only. This is not real VLM accuracy.",
+        mode_label = st.selectbox(
+            "Demo mode",
+            ["Retrieval-only", "Cached prediction", "Live VLM", "Mock smoke"],
+            index=0,
         )
+        prediction_mode = normalize_demo_prediction_mode(mode_to_internal(mode_label))
+        cached_predictions_path = st.text_input(
+            "Cached prediction JSONL",
+            DEFAULT_CACHED_PREDICTIONS,
+            disabled=prediction_mode != "cached",
+        )
+        use_curated = st.checkbox("Use curated presentation cases", value=True)
 
     try:
+        config = cached_config(config_path)
         samples = cached_samples(config_path, split)
     except Exception as exc:
         st.error(
@@ -179,40 +269,59 @@ def main() -> None:
         return
 
     with st.sidebar:
-        selected_sample = st.selectbox(
-            "Validation sample",
+        curated_sample = select_curated_sample(samples) if use_curated else None
+        selected_sample = curated_sample or st.selectbox(
+            "Sample",
             samples,
             format_func=format_sample_option,
         )
-        run_clicked = st.button("Run Retrieval Inspection", type="primary")
+        model_status = demo_model_status(
+            config,
+            prediction_mode=prediction_mode,
+            cached_predictions_path=cached_predictions_path,
+        )
+        if model_status.get("available"):
+            st.success(model_status.get("reason"))
+        else:
+            st.info(model_status.get("reason"))
+
+        if prediction_mode == "cached":
+            try:
+                cache = cached_prediction_index(cached_predictions_path)
+                st.caption(f"Cached predictions loaded: `{len(cache)}` rows")
+            except Exception as exc:
+                st.warning(f"Cached artifact unavailable: {type(exc).__name__}")
+
+        run_clicked = st.button("Run Demo", type="primary")
 
     st.info(
-        "This inspection page does not require model/API credentials. If no VLM "
-        "backend is configured, it stays in retrieval-only mode."
+        "The demo can be presented without a live GPU/API by using retrieval-only "
+        "or cached prediction mode."
     )
 
     if not run_clicked:
         render_question(selected_sample)
-        st.caption("Press **Run Retrieval Inspection** to retrieve legal evidence.")
+        st.caption("Press **Run Demo** to retrieve legal evidence and render output.")
         return
 
+    use_live_backend = prediction_mode == "live" and model_status.get("available")
     try:
-        with st.spinner("Retrieving legal evidence..."):
+        with st.spinner("Running evidence-grounded demo..."):
             result = build_demo_inspection(
                 sample_id=selected_sample["id"],
-                config=cached_config(config_path),
+                config=config,
                 split=split,
                 top_k=top_k,
                 retrieval_strategy_name=retrieval_strategy,
-                include_prediction=include_prediction,
-                use_mock_prediction=use_mock_prediction,
-                runtime=cached_runtime(config_path),
+                prediction_mode=prediction_mode,
+                cached_predictions_path=cached_predictions_path,
+                runtime=cached_runtime(config_path, use_live_backend=bool(use_live_backend)),
             )
     except Exception as exc:
-        st.error("Retrieval inspection failed.")
+        st.error("Demo run failed.")
         st.caption(
-            "Check Qdrant status, processed LawDB, split files, and whether the "
-            "selected retrieval strategy has been indexed."
+            "Check Qdrant status, processed LawDB, split files, cached artifact, "
+            "and whether the selected retrieval strategy has been indexed."
         )
         st.caption(f"{type(exc).__name__}: {exc}")
         return
@@ -221,9 +330,10 @@ def main() -> None:
     with left:
         render_image(result.get("local_image_path"), result["sample"])
         render_question(result["sample"])
+        render_latency(result)
     with right:
-        render_evidence(result)
         render_prediction(result)
+        render_evidence(result)
 
 
 if __name__ == "__main__":
