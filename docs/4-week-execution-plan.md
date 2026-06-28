@@ -350,108 +350,104 @@ when creating the actual week-3 issues.
 - **PR:** `experiment/w3-04-freeze-retrieval`, title
   `experiment: freeze retrieval configuration from ablations`.
 
-### W3-05 - Run B2-B6 experiment matrix
+### W3-06 - Real baselines and QLoRA diagnostic smoke
 
-- **Owner/reviewer:** M4/M3; **priority:** P0; **depends on:** W3-02..W3-04;
+- **Owner/reviewer:** M4/M3; **priority:** P0; **depends on:** W3-02..W3-05;
   **days:** Thu-Sat.
 - **Change:** `src/evaluate.py`, `src/pipeline.py`, `scripts/evaluate.sh`,
   `docs/experiments.md`.
 - **Reference:** both reference projects' evaluation scripts and experiment
   tables.
-- **Acceptance:** same locked validation set for zero-shot, oracle-law,
-  few-shot, structured reasoning, QLoRA+retrieved-law, and QLoRA+oracle-law;
-  failures do not silently become answer A/Đúng; all artifacts are versioned.
-- **PR:** `experiment/w3-05-model-matrix`, title
-  `experiment: evaluate prompting retrieval and QLoRA variants`.
+- **Acceptance:** real/base VLM metrics are separated from mock metrics; QLoRA
+  is reported as diagnostic smoke with checkpoint metadata, OOM limitation,
+  parse/truncation counts, and no submission-quality overclaim.
+- **PR:** `experiment/w3-06-real-baselines-qlora-diagnostic`, title
+  `experiment: evaluate real baselines and QLoRA diagnostic smoke`.
 
-### W3-06 - Week 3 integration and report
+### W3-07 - Week 3 integration, report, and checkpoint card
 
-- **Owner/reviewer:** M4/M3; **priority:** P0; **depends on:** W3-01..W3-05;
+- **Owner/reviewer:** M4/M3; **priority:** P0; **depends on:** W3-01..W3-06;
   **day:** Sun.
 - **Change:** `Makefile`, `README.md`, `docs/report.md`, model/checkpoint card.
 - **Acceptance:** exact training and evaluation commands documented; checkpoint
-  is stored outside Git with a checksum and access instructions; weekly report
-  records compute, Accuracy, retrieval ceiling, risks, and contributions; tag
-  release `w3-qlora`.
-- **PR:** `release/w3-qlora`, title
-  `release: integrate QLoRA and controlled experiments`.
+  is stored outside Git; weekly report records real baselines, QLoRA diagnostic
+  evidence, OOM/validation-smoke limitations, risks, and week-4 direction.
+- **PR:** `release/w3-qlora-diagnostic-report`, title
+  `release: integrate week 3 report and QLoRA checkpoint card`.
 
 ## 8. Week 4: Product, Quality, and Defense Package
 
-### W4-01 - End-to-end assistant pipeline
+Detailed GitHub-ready issue bodies for this week are in
+[`docs/week4-issues.md`](week4-issues.md). Use that file as the source of truth
+when creating the actual week-4 issues.
 
-- **Owner/reviewer:** M4/M3; **priority:** P0; **days:** Mon-Tue.
-- **Change:** `src/pipeline.py`, `configs/config.yaml`, `scripts/demo.sh`, new
-  `tests/test_pipeline.py`.
-- **Reference:** LexiSign `src/core/sub_task_1.py` and `sub_task_2.py`.
-- **Acceptance:** image+question input returns answer, evidence, citations,
-  scores, and latency; components are injectable for tests; helpful errors for
-  missing model/index/data; no broad exception that returns a fake answer.
-- **PR:** `feat/w4-01-assistant`, title
-  `feat(pipeline): integrate end-to-end legal assistant`.
+### W4-01 - Adapter batch inference pipeline
 
-### W4-02 - Streamlit demonstration
+- **Owner/reviewer:** M3/M2; **priority:** P1; **needs:** GPU; **days:** Mon-Tue.
+- **Change:** optional `src/adapter_infer.py`, adapter diagnostic configs,
+  parser diagnostics tests.
+- **Acceptance:** local adapter can run diagnostic batch inference when
+  available; invalid JSON/truncation is counted; no checkpoint/output artifact
+  is committed.
+- **PR:** `feat/w4-01-adapter-batch-inference`, title
+  `feat(vlm): add QLoRA adapter batch inference diagnostics`.
 
-- **Owner/reviewer:** M2/M1; **priority:** P0; **depends on:** W4-01;
+### W4-02 - Full validation and error analysis
+
+- **Owner/reviewer:** M4/M3; **priority:** P0; **depends on:** W3-05/W3-06;
+  **days:** Mon-Wed.
+- **Change:** final experiment configs, `docs/experiments.md`,
+  `docs/error-analysis.md`, evaluator diagnostics if needed.
+- **Acceptance:** final validation table uses the locked split; at least 30
+  failures are categorized; mock, real, and QLoRA diagnostic rows are clearly
+  separated.
+- **PR:** `experiment/w4-02-full-validation-error-analysis`, title
+  `experiment: run final validation and error analysis`.
+
+### W4-03 - Submission converter and format validator
+
+- **Owner/reviewer:** M1/M4; **priority:** P0; **depends on:** W4-02;
   **days:** Tue-Thu.
-- **Change:** `app/streamlit_app.py`, `app/__init__.py`, optional UI helpers.
-- **Reference:** LexiSign `src/ui/inspect_subtask1.py`.
-- **Acceptance:** upload image, enter question/choices, select approved model
-  configuration, view answer and cited legal text; show latency and disclaimer;
-  cache resources; do not display secrets or unrestricted internal reasoning.
-- **PR:** `feat/w4-02-streamlit`, title
-  `feat(demo): add evidence-grounded Streamlit interface`.
+- **Change:** new `src/submission.py`, submission tests, command docs.
+- **Acceptance:** internal prediction JSONL converts to submission JSON;
+  missing IDs and invalid answers fail validation; no fake defaults are inserted.
+- **PR:** `feat/w4-03-submission-converter`, title
+  `feat(eval): add submission converter and validator`.
 
-### W4-03 - End-to-end tests and release checks
+### W4-04 - Final Streamlit demo
 
-- **Owner/reviewer:** M1/M4; **priority:** P0; **days:** Tue-Thu.
-- **Change:** `tests/`, `scripts/check_data.sh`, `.github/workflows/ci.yml`.
-- **Reference:** project schemas and acceptance criteria in this plan.
-- **Acceptance:** unit tests cover normalization, split leakage, metrics,
-  retrieval exclusion, output parsing, citations, and mocked pipeline; data
-  check uses actual configured paths; CI passes from a clean checkout.
-- **PR:** `test/w4-03-release-suite`, title
-  `test: add end-to-end release checks`.
+- **Owner/reviewer:** M2/M1; **priority:** P0; **days:** Tue-Thu.
+- **Change:** `app/streamlit_app.py`, demo-facing pipeline helpers,
+  `scripts/demo.sh`, README instructions.
+- **Acceptance:** demo works in retrieval-only and cached-prediction modes;
+  live VLM mode is optional; citations, evidence, disclaimer, and latency are
+  visible.
+- **PR:** `feat/w4-04-final-streamlit-demo`, title
+  `feat(demo): polish final evidence-grounded Streamlit demo`.
 
-### W4-04 - Error analysis and responsible-use evaluation
+### W4-05 - Final report, slides, and reproducibility pack
 
-- **Owner/reviewer:** M2/M1; **priority:** P1; **days:** Thu-Fri.
-- **Change:** new `docs/error-analysis.md`, `docs/experiments.md`.
-- **Reference:** failure analyses in both reference project papers and LexiSign
-  inspection UI.
-- **Acceptance:** manually classify at least 30 errors into visual, retrieval,
-  legal-context, reasoning, output-format, and annotation/data errors; include
-  representative IDs and proposed fixes; test citation validity and refusal for
-  unsupported inputs.
-- **PR:** `docs/w4-04-error-analysis`, title
-  `docs: analyze model failures and responsible use`.
+- **Owner/reviewer:** M3/M2; **priority:** P0; **depends on:** W4-02..W4-04;
+  **days:** Wed-Sat.
+- **Change:** `docs/report.md`, `docs/experiments.md`,
+  `docs/checkpoint-card.md`, README, optional slides/assets.
+- **Acceptance:** final report states retrieval-grounded structured prompting
+  as the main product and QLoRA as diagnostic; every number traces to an
+  artifact; limitations and four-month continuation are clear.
+- **PR:** `docs/w4-05-final-report-slides`, title
+  `docs: complete final report slides and reproducibility pack`.
 
-### W4-05 - Final report and defense assets
-
-- **Owner/reviewer:** M3/M2; **priority:** P0; **days:** Wed-Sat.
-- **Change:** `docs/report.md`, new `docs/model-card.md`, final experiment
-  figures under `docs/assets/`.
-- **Reference:** methodology and experiment organization from both reference
-  READMEs and papers; all reported numbers must come from this repository's
-  artifacts.
-- **Acceptance:** problem, dataset, leakage-safe methodology, architecture,
-  experiment matrix, ablations, errors, limitations, ethics, individual work,
-  and four-month continuation plan; no claim copied from a reference project as
-  the team's own result.
-- **PR:** `docs/w4-05-final-report`, title
-  `docs: complete report model card and defense assets`.
-
-### W4-06 - Final release and demonstration rehearsal
+### W4-06 - Final release cleanup and defense rehearsal
 
 - **Owner/reviewer:** M4/M3; **priority:** P0; **depends on:** W4-01..W4-05;
   **day:** Sun.
-- **Change:** `README.md`, `Makefile`, `.env.example`, release notes; only fix
-  blocking integration defects elsewhere.
-- **Acceptance:** fresh-clone rehearsal; `make test`, `make benchmark`, and
-  `make demo` documented and passing in their supported environments; backup
-  recorded demo; final metrics attached; tag `v0.1.0-course`.
+- **Change:** `README.md`, `Makefile`, `.env.example`, release notes, command
+  audit; only fix blocking bugs elsewhere.
+- **Acceptance:** `make verify` passes; no ignored artifacts are staged; demo
+  rehearsal or backup recording exists; release notes summarize scope and
+  limitations.
 - **PR:** `release/v0.1.0-course`, title
-  `release: publish four-week capstone prototype`.
+  `release: publish final four-week capstone prototype`.
 
 ## 9. PR Order and Parallel Work
 
@@ -467,13 +463,13 @@ W2-01 -> W2-02 -> W2-03 -----> W2-06
                  \-> W2-04 -> W2-05 -/
 
 W3-01 -> W3-02 --------\
-W3-03 -------------------> W3-05 -> W3-06
-W3-04 ------------------/
+W3-03 -> W3-04 ---------> W3-06 -> W3-07
+W3-05 ------------------/
 
-W4-01 -> W4-02 ----\
-       -> W4-03 -----\
-W4-04 ---------------> W4-06
-W4-05 --------------/
+W4-01 --------\
+W4-02 ---------> W4-05 -> W4-06
+W4-03 ----\    /
+W4-04 -----\--/
 ```
 
 M1 starts W1-02 and then W1-03. M2 can prepare the retrieval interface while
@@ -537,7 +533,8 @@ If the schedule slips, cut in this order:
 2. Object detection and cropped-sign retrieval.
 3. Extra embedding models beyond one text and one image model.
 4. Advanced UI styling.
-5. QLoRA hyperparameter sweep; keep one smoke run and one controlled run.
+5. QLoRA hyperparameter sweep; keep only diagnostic smoke evidence unless the
+   adapter is clearly stable.
 
 Never cut the grouped split, metrics, zero-shot baseline, retrieval baseline,
 tests, citation validation, weekly evidence, or final error analysis.

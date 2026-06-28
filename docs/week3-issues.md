@@ -482,7 +482,7 @@ python -m src.pipeline --mode benchmark --config configs/experiments/retrieval_f
 python -m src.evaluate --config configs/experiments/retrieval_final.yaml --predictions data/outputs/experiments/retrieval_final.jsonl
 ```
 
-## W3-06 - Run Controlled Base, Structured, And QLoRA Experiments
+## W3-06 - Run Controlled Real Baselines And QLoRA Diagnostic Smoke
 
 Labels: `week-3`, `P0`, `evaluation`, `training`, `vlm`
 
@@ -490,26 +490,30 @@ Milestone: `W3 - QLoRA and controlled experiments`
 
 Owner/reviewer: `M4` / `M3`
 
-Branch: `experiment/w3-06-controlled-matrix`
+Branch: `experiment/w3-06-real-baselines-qlora-diagnostic`
 
-PR title: `experiment: evaluate base structured and QLoRA variants`
+PR title: `experiment: evaluate real baselines and QLoRA diagnostic smoke`
 
 Depends on: `W3-02`, `W3-03`, `W3-04`, `W3-05`
 
 ### Description
 
-Run the week-3 experiment matrix on the same locked validation split. This is
-the comparison that tells whether real VLM prompting and small QLoRA training
-improve over the week-2 mock/smoke pipeline.
+Run controlled week-3 model checks without overstating the QLoRA result. The
+main goal is to replace week-2 mock metrics with real/base VLM baselines when
+a backend is available, then document QLoRA as a diagnostic PEFT smoke
+experiment. The current 80-sample adapter is useful evidence that training
+works, but it is not strong enough to become the official submission model.
 
 ### Project Files To Change
 
 - `configs/experiments/` (new W3 configs)
 - `src/pipeline.py`
-- `src/evaluate.py` only if metrics artifact needs a small extension
+- `src/evaluate.py`
+- optional `src/adapter_infer.py` if adapter smoke inference needs a separate entrypoint
 - `scripts/evaluate.sh`
 - `docs/experiments.md`
 - `tests/test_experiment_config.py`
+- `tests/test_evaluate.py` if artifact fields are extended
 
 ### Reference Files To Study
 
@@ -521,44 +525,67 @@ improve over the week-2 mock/smoke pipeline.
 
 ### Implementation Notes
 
-- Suggested W3 configs:
+- P0 real baseline configs:
   - `W3_B2_text_rag_real`: base VLM + direct LawDB retrieval.
-  - `W3_B4_few_shot_real`: base VLM + fused evidence + retrieved examples.
-  - `W3_B5_structured_real`: base VLM + structured legal reasoning prompt.
-  - `W3_B6_qlora_retrieved`: QLoRA adapter + final retrieved evidence.
-  - `W3_B7_qlora_oracle`: QLoRA adapter + oracle gold evidence as a ceiling.
-- Every run must store model/backend name, adapter path if used, prompt
-  variant, retrieval config, seed, split hash, latency, invalid IDs, retrieval
-  metrics, and QA metrics.
-- Real VLM runs must be marked `mock=false`.
-- If QLoRA is blocked by GPU availability, still run base VLM configs and
-  document the QLoRA blocker instead of inventing numbers.
+  - `W3_B5_structured_real`: base VLM + frozen/fused retrieval + structured
+    legal reasoning prompt.
+- P0 artifact fields:
+  - model/backend name;
+  - prompt variant;
+  - retrieval config;
+  - seed and split hash;
+  - `max_new_tokens`;
+  - parse success count;
+  - invalid JSON count;
+  - truncated output count;
+  - latency;
+  - retrieval metrics and QA metrics.
+- QLoRA is diagnostic unless adapter inference is fully integrated into the
+  benchmark pipeline. The GPU evidence to document is:
+  - 20-sample smoke run succeeded;
+  - 80-sample QLoRA run succeeded;
+  - 300-sample run failed with CUDA OOM on RTX 3090 24GB;
+  - validation smoke with `max_new_tokens=160` had many truncated outputs;
+  - validation smoke with `max_new_tokens=320` reached `1/3` exact match.
+- Report QLoRA checkpoint metadata, not leaderboard-quality validation claims.
+- Real/base VLM runs must be marked `mock=false`.
 - Failures must not silently become `A` or `Đúng`.
+- No checkpoint, adapter, model weight, or bulky GPU output may be committed.
 
 ### Expected Output
 
-- W3 experiment config files under `configs/experiments/`.
-- Prediction JSONL and metrics JSON under `data/outputs/experiments/`.
-- `docs/experiments.md` includes a W3 table comparing base, structured, and
-  QLoRA runs.
+- Real/base VLM prediction JSONL and metrics JSON if the backend is available.
+- QLoRA diagnostic smoke notes with adapter metadata and validation-smoke
+  limitations.
+- `docs/experiments.md` clearly separates:
+  - week-2 mock smoke metrics;
+  - real/base VLM metrics;
+  - structured prompt metrics;
+  - QLoRA diagnostic smoke evidence.
 
 ### Acceptance Criteria
 
 - [ ] All W3 configs use the same locked validation split unless explicitly
   marked non-comparable.
-- [ ] Metrics artifacts clearly mark `mock=false` for real model runs.
-- [ ] QLoRA adapter metadata is linked when a QLoRA run is reported.
-- [ ] Retrieval and QA metrics are shown together.
-- [ ] Invalid/error samples are listed.
-- [ ] Oracle-evidence results are labeled as ceiling/diagnostic, not deployable
-  performance.
+- [ ] Real/base runs clearly mark `mock=false`.
+- [ ] Metrics artifacts include backend/model, prompt variant, retrieval
+  strategy, `max_new_tokens`, parse success, invalid JSON, truncated output,
+  latency, retrieval metrics, and QA metrics.
+- [ ] QLoRA diagnostic smoke is not reported as final validation accuracy.
+- [ ] The 80-sample checkpoint metadata is linked or summarized.
+- [ ] The 300-sample CUDA OOM limitation is documented.
+- [ ] The validation smoke result is documented, including `1/3` exact match
+  with `max_new_tokens=320`.
+- [ ] No checkpoint/model artifacts are committed.
 
 ### Tests
 
 - Unit test W3 experiment config loading.
-- Unit test artifact includes model/backend/adapter metadata.
+- Unit test artifact includes model/backend, `max_new_tokens`, parse status,
+  and adapter metadata when present.
 - Unit test split mismatch is rejected.
-- Unit test invalid predictions are counted as incorrect.
+- Unit test invalid/truncated predictions are counted separately and counted
+  as incorrect.
 - Manual review of metrics table before reporting numbers.
 
 ### Verification
@@ -568,11 +595,11 @@ python -m pytest tests/test_experiment_config.py tests/test_evaluate.py tests/te
 python -m src.pipeline --mode benchmark --config configs/experiments/w3_b2_text_rag_real.yaml --limit 5
 python -m src.evaluate --config configs/experiments/w3_b2_text_rag_real.yaml --predictions data/outputs/experiments/w3_b2_text_rag_real.jsonl
 
-# GPU/adapter run, only after W3-02 succeeds:
-python -m src.pipeline --mode benchmark --config configs/experiments/w3_b6_qlora_retrieved.yaml --limit 5
+# Adapter diagnostic only, if adapter inference is wired:
+python -m src.adapter_infer --adapter checkpoints/qlora_adapter --split val --limit 3 --max-new-tokens 320
 ```
 
-## W3-07 - Week 3 Integration, Report, And Checkpoint Card
+## W3-07 - Week 3 Integration, Report, And QLoRA Checkpoint Card
 
 Labels: `week-3`, `P0`, `documentation`, `evaluation`
 
@@ -580,17 +607,19 @@ Milestone: `W3 - QLoRA and controlled experiments`
 
 Owner/reviewer: `M4` / `M3`
 
-Branch: `release/w3-qlora-controlled-experiments`
+Branch: `release/w3-qlora-diagnostic-report`
 
-PR title: `release: integrate week 3 QLoRA and controlled experiments`
+PR title: `release: integrate week 3 report and QLoRA checkpoint card`
 
 Depends on: `W3-01`, `W3-02`, `W3-03`, `W3-04`, `W3-05`, `W3-06`
 
 ### Description
 
 Integrate the week-3 training and experiment work into one reportable release.
-The release should make clear what is fully implemented, what was only smoke
-tested, what requires GPU, and what should continue into week 4.
+The release must be honest about the GPU result: QLoRA training is real and
+reproducible, but the current 80-sample adapter is diagnostic and not
+submission-ready. The main week-4 product direction remains retrieval,
+structured prompting, evaluation, demo, and submission/export.
 
 ### Project Files To Change
 
@@ -598,7 +627,7 @@ tested, what requires GPU, and what should continue into week 4.
 - `README.md`
 - `docs/report.md`
 - `docs/experiments.md`
-- `docs/model-card.md` (new, or `docs/checkpoint-card.md`)
+- `docs/checkpoint-card.md` (new, or `docs/model-card.md`)
 - `configs/qlora.yaml`
 - Release notes if the team keeps them
 
@@ -613,11 +642,23 @@ tested, what requires GPU, and what should continue into week 4.
 ### Implementation Notes
 
 - Separate mock smoke metrics, real base VLM metrics, and QLoRA metrics.
-- If QLoRA did not run, document the blocker and still report CPU-safe work:
-  SFT data, collator, config validation, dry-run, and planned GPU command.
-- The checkpoint/model card should include base model, adapter location,
-  training data hash, split hash, hyperparameters, compute environment, known
-  limitations, and how to reproduce evaluation.
+- The checkpoint card should include:
+  - base model: `Qwen/Qwen2.5-VL-3B-Instruct`;
+  - adapter path: `checkpoints/qlora_adapter`;
+  - effective train count: `80`;
+  - GPU: RTX 3090 24GB;
+  - dtype: `bfloat16`;
+  - LoRA rank/alpha/dropout;
+  - trainable parameter count;
+  - dataset hash and split hash;
+  - training commands;
+  - validation smoke commands;
+  - known limitations.
+- Known limitations must include:
+  - 300-sample run failed with CUDA OOM;
+  - current adapter is weak on validation smoke;
+  - low `max_new_tokens` causes JSON truncation;
+  - current adapter should not be used as the submission-quality model.
 - Store checkpoints outside Git. Include checksum/access instructions only if
   a checkpoint exists.
 - Update the four-month continuation plan based on actual week-3 findings.
@@ -626,8 +667,9 @@ tested, what requires GPU, and what should continue into week 4.
 
 - Week-3 report section with commands, metrics, blockers, errors, and member
   contributions.
-- Model/checkpoint card for the QLoRA adapter or a clear blocked-run note.
+- QLoRA checkpoint card with GPU environment and limitations.
 - README/Makefile commands for W3 training/evaluation.
+- Week-4 plan that prioritizes final system quality over bigger training.
 
 ### Acceptance Criteria
 
@@ -635,16 +677,21 @@ tested, what requires GPU, and what should continue into week 4.
 - [ ] Report includes retrieval P/R/F2 and QA Accuracy for real runs that were
   actually executed.
 - [ ] Mock results are not presented as final model quality.
-- [ ] QLoRA checkpoint metadata or blocker note is included.
+- [ ] QLoRA checkpoint metadata is included.
+- [ ] 300-sample OOM and validation-smoke weakness are documented.
+- [ ] The report explicitly recommends not using the current adapter as the
+  final submission model.
 - [ ] Large artifacts and model weights remain outside Git.
-- [ ] Next-week plan prioritizes demo polish, full validation run, error
-  analysis, and final defense assets.
+- [ ] Next-week plan prioritizes real baseline validation, error analysis,
+  submission/export, demo polish, and final defense assets.
 
 ### Tests
 
 - Run the project verification command.
 - Manual check that docs reference only existing artifacts.
 - Manual check that every reported number can be traced to a metrics JSON.
+- Manual check that checkpoint claims can be traced to `adapter_metadata.json`
+  or trainer logs.
 - Manual fresh-clone command review for README/Makefile instructions.
 
 ### Verification
