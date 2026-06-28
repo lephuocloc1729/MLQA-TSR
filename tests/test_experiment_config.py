@@ -19,6 +19,10 @@ EXPERIMENT_CONFIGS = [
     "configs/experiments/w2_b3_fused_rag.yaml",
     "configs/experiments/w2_b4_few_shot_rag.yaml",
 ]
+W3_EXPERIMENT_CONFIGS = [
+    "configs/experiments/w3_b2_text_rag_real.yaml",
+    "configs/experiments/w3_b5_structured_real.yaml",
+]
 
 
 def citation(article_id: str) -> dict:
@@ -89,6 +93,25 @@ def test_retrieval_final_config_freezes_locked_validation_fusion_settings():
         "detector-driven sign retrieval",
     }
     assert locked_split_identity(config)["split_path"] == freeze["locked_split"]
+
+
+def test_week3_real_experiment_configs_load_and_use_locked_split():
+    configs = [load_config(path) for path in W3_EXPERIMENT_CONFIGS]
+
+    identity = assert_locked_validation_split(configs)
+
+    assert identity["split"] == "val"
+    assert identity["split_path"] == "data/processed/val_split.jsonl"
+    assert [config["experiment"]["name"] for config in configs] == [
+        "w3_b2_text_rag_real",
+        "w3_b5_structured_real",
+    ]
+    assert all(config["experiment"]["mock"] is False for config in configs)
+    assert configs[0]["experiment"]["retrieval_strategy"] == "text"
+    assert configs[1]["experiment"]["retrieval_strategy"] == "fusion"
+    assert configs[1]["experiment"]["prompt_variant"] == "structured_legal_rag"
+    assert configs[1]["retrieval"]["fusion_allow_example_failure"] is False
+    assert configs[0]["model"]["max_new_tokens"] == 512
 
 
 def test_split_drift_is_rejected_unless_explicitly_overridden():

@@ -44,12 +44,16 @@ The metrics artifact stores:
 
 - config name and seed
 - experiment name, label, retrieval strategy, prompt variant, and `mock`
+- model backend/name, `max_new_tokens`, and image-input flag
+- retrieval config snapshot, including frozen config version when available
 - prediction path and file hash
 - split manifest path, split hash, and split counts when available
 - timestamp
 - latency summary
+- parse success count, invalid JSON count, and truncated output count
 - retrieval and QA metrics
 - failed or invalid sample IDs
+- adapter diagnostic metadata when an adapter run is explicitly configured
 
 ## Week 2 Ablation Matrix
 
@@ -212,6 +216,73 @@ OCR, cropped-sign detection, and detector-driven sign retrieval remain
 documented stretch work. Do not add them as required components unless a
 locked-validation ablation shows measured improvement over
 `retrieval_final-v1`.
+
+## Week 3 Controlled Runs
+
+Week 3 replaces week-2 mock smoke checks with real/base VLM baselines when an
+OpenAI-compatible backend or hosted local model is available. Every real run
+must use the locked validation split and must write `mock=false` in both the
+prediction JSONL and metrics JSON.
+
+| Config | Label | Retrieval | Prompt | Mock? | Output |
+| --- | --- | --- | --- | --- | --- |
+| `configs/experiments/w3_b2_text_rag_real.yaml` | `W3_B2_text_rag_real` | direct LawDB text top-5 | `text_rag` | no | `data/outputs/experiments/w3_b2_text_rag_real.jsonl` |
+| `configs/experiments/w3_b5_structured_real.yaml` | `W3_B5_structured_real` | frozen fused retrieval top-5 | `structured_legal_rag` | no | `data/outputs/experiments/w3_b5_structured_real.jsonl` |
+
+Before running these configs, set backend credentials in the environment:
+
+```bash
+export OPENAI_COMPATIBLE_BASE_URL="http://localhost:8000/v1"
+export OPENAI_COMPATIBLE_API_KEY="..."
+export OPENAI_COMPATIBLE_MODEL="Qwen/Qwen2.5-VL-3B-Instruct"
+```
+
+Then run a controlled smoke pass:
+
+```bash
+make qdrant-up
+make preprocess
+make index
+make index-examples
+scripts/evaluate.sh run-w3-real 5
+```
+
+The W3 metrics table should include retrieval P/R/F2, QA accuracy,
+`parse.parse_success_count`, `parse.invalid_json_count`,
+`parse.truncated_output_count`, latency, backend/model, prompt variant, and
+`max_new_tokens`. Do not copy week-2 mock QA values into the real-run table.
+
+### QLoRA Diagnostic Smoke
+
+The local QLoRA adapter is diagnostic evidence that PEFT training can run; it
+is not the official submission model.
+
+Checkpoint metadata summary from `checkpoints/qlora_adapter/adapter_metadata.json`
+(ignored by Git, summarized here only):
+
+| Field | Value |
+| --- | --- |
+| Base model | `Qwen/Qwen2.5-VL-3B-Instruct` |
+| Adapter path | `checkpoints/qlora_adapter` |
+| Effective train count | `80` |
+| Train/val counts | `421 / 109` |
+| Split hash | `3ffba07cf68cccfdfaf921d34d01903223c96810979cb573c68c67c7b3471448` |
+| LoRA rank/alpha | `8 / 16` |
+| Trainable parameters | `18,576,384` (`0.905%`) |
+| Device/dtype | `cuda`, `bfloat16` |
+
+Diagnostic evidence:
+
+- 20-sample GPU smoke run succeeded.
+- 80-sample QLoRA run succeeded and wrote adapter metadata.
+- 300-sample QLoRA run failed with CUDA OOM on RTX 3090 24GB.
+- Validation smoke with `max_new_tokens=160` produced many truncated outputs.
+- Validation smoke with `max_new_tokens=320` reached `1/3` exact match.
+
+Report these as training/integration diagnostics only. Do not report the
+80-sample adapter as leaderboard-quality validation accuracy unless adapter
+inference is fully integrated into the benchmark pipeline and evaluated on the
+locked split with the same artifact contract.
 
 ## Naming
 

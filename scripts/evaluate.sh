@@ -27,6 +27,15 @@ print(benchmark_output_path(load_config(sys.argv[1])))
 PY
 )"
   python -m src.evaluate --config "$config" --predictions "$output_path"
+elif [ "$1" = "run-w3-real" ]; then
+  shift
+  limit="${1:-5}"
+  for config in \
+    configs/experiments/w3_b2_text_rag_real.yaml \
+    configs/experiments/w3_b5_structured_real.yaml
+  do
+    "$0" run-experiment "$config" "$limit"
+  done
 else
   python -m src.evaluate "$@"
 fi

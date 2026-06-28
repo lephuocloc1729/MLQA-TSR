@@ -246,6 +246,14 @@ def first_record_experiment(records: list[Mapping[str, Any]]) -> Mapping[str, An
     return {}
 
 
+def first_record_mapping(records: list[Mapping[str, Any]], key: str) -> Mapping[str, Any]:
+    for record in records:
+        value = as_mapping(record.get(key))
+        if value:
+            return value
+    return {}
+
+
 def is_valid_prediction_answer(answer: str, question_type: str) -> bool:
     if not answer:
         return False
@@ -403,6 +411,170 @@ def build_split_metadata(config: Mapping[str, Any]) -> dict[str, Any]:
     return metadata
 
 
+def build_model_metadata(
+    config: Mapping[str, Any],
+    records: list[Mapping[str, Any]],
+) -> dict[str, Any]:
+    model_config = as_mapping(config.get("model"))
+    record_model = first_record_mapping(records, "model")
+    return {
+        "backend": record_model.get("backend", model_config.get("backend")),
+        "name": record_model.get("name", model_config.get("name")),
+        "name_env": record_model.get("name_env", model_config.get("name_env")),
+        "temperature": record_model.get("temperature", model_config.get("temperature")),
+        "max_new_tokens": record_model.get(
+            "max_new_tokens",
+            model_config.get("max_new_tokens"),
+        ),
+        "include_image": record_model.get("include_image", model_config.get("include_image")),
+    }
+
+
+def build_retrieval_config_metadata(
+    config: Mapping[str, Any],
+    records: list[Mapping[str, Any]],
+) -> dict[str, Any]:
+    retrieval_config = as_mapping(config.get("retrieval"))
+    experiment_config = as_mapping(config.get("experiment"))
+    freeze_config = as_mapping(config.get("retrieval_freeze"))
+    record_retrieval = first_record_mapping(records, "retrieval_config")
+    return {
+        "strategy": record_retrieval.get(
+            "strategy",
+            experiment_config.get("retrieval_strategy"),
+        ),
+        "freeze_version": record_retrieval.get(
+            "freeze_version",
+            freeze_config.get("version"),
+        ),
+        "prompt_variant": experiment_config.get("prompt_variant")
+        or as_mapping(config.get("prompt")).get("variant"),
+        "top_k": record_retrieval.get("top_k", retrieval_config.get("top_k")),
+        "example_top_k": record_retrieval.get(
+            "example_top_k",
+            retrieval_config.get("example_top_k"),
+        ),
+        "example_retrieval_mode": record_retrieval.get(
+            "example_retrieval_mode",
+            experiment_config.get("example_retrieval_mode"),
+        ),
+        "text_weight": record_retrieval.get("text_weight", retrieval_config.get("text_weight")),
+        "image_weight": record_retrieval.get("image_weight", retrieval_config.get("image_weight")),
+        "fusion_direct_weight": record_retrieval.get(
+            "fusion_direct_weight",
+            retrieval_config.get("fusion_direct_weight"),
+        ),
+        "fusion_example_vote_weight": record_retrieval.get(
+            "fusion_example_vote_weight",
+            retrieval_config.get("fusion_example_vote_weight"),
+        ),
+    }
+
+
+def looks_like_invalid_json_text(text: Any) -> bool:
+    normalized = normalize_text(text).casefold()
+    return (
+        "json" in normalized
+        or "does not contain a json object" in normalized
+        or "must contain exactly answer" in normalized
+        or "response json must be an object" in normalized
+        or "malformed json" in normalized
+    )
+
+
+def looks_like_truncated_text(text: Any) -> bool:
+    normalized = normalize_text(text).casefold()
+    return any(
+        marker in normalized
+        for marker in (
+            "truncated",
+            "unterminated",
+            "unexpected end",
+            "eof",
+            "max_new_tokens",
+        )
+    )
+
+
+def record_parse_status(record: Mapping[str, Any], sample_id: str) -> dict[str, Any]:
+    parse = as_mapping(record.get("parse"))
+    if parse:
+        success = bool(parse.get("success")) or parse.get("status") == "success"
+        return {
+            "id": sample_id,
+            "success": success,
+            "invalid_json": bool(parse.get("invalid_json")),
+            "truncated_output": bool(parse.get("truncated_output")),
+            "status": normalize_text(parse.get("status")) or ("success" if success else "error"),
+        }
+
+    prediction = as_mapping(record.get("prediction"))
+    error = as_mapping(prediction.get("error"))
+    if error:
+        error_text = " ".join(
+            normalize_text(error.get(key))
+            for key in ("type", "message")
+            if error.get(key) is not None
+        )
+        return {
+            "id": sample_id,
+            "success": False,
+            "invalid_json": looks_like_invalid_json_text(error_text),
+            "truncated_output": looks_like_truncated_text(error_text),
+            "status": "error",
+        }
+
+    raw_response = prediction.get("raw_response")
+    answer = extract_prediction_answer(record)
+    success = answer is not None
+    return {
+        "id": sample_id,
+        "success": success,
+        "invalid_json": False,
+        "truncated_output": looks_like_truncated_text(raw_response),
+        "status": "success" if success else "missing_prediction",
+    }
+
+
+def evaluate_parse_status(
+    records: list[Mapping[str, Any]],
+    invalid_rows: list[dict[str, str]],
+) -> dict[str, Any]:
+    statuses = [
+        record_parse_status(record, extract_sample_id(record, index))
+        for index, record in enumerate(records)
+    ]
+    jsonl_invalid_rows = [
+        row
+        for row in invalid_rows
+        if looks_like_invalid_json_text(row.get("reason", ""))
+    ]
+    invalid_json_ids = [
+        status["id"] for status in statuses if status["invalid_json"]
+    ] + [row["id"] for row in jsonl_invalid_rows if row.get("id")]
+    truncated_ids = [
+        status["id"] for status in statuses if status["truncated_output"]
+    ]
+    return {
+        "sample_count": len(records),
+        "parse_success_count": sum(1 for status in statuses if status["success"]),
+        "parse_failure_count": sum(1 for status in statuses if not status["success"]),
+        "invalid_json_count": len(invalid_json_ids),
+        "model_invalid_json_count": sum(1 for status in statuses if status["invalid_json"]),
+        "jsonl_invalid_row_count": len(jsonl_invalid_rows),
+        "truncated_output_count": len(truncated_ids),
+        "invalid_json_sample_ids": invalid_json_ids,
+        "truncated_sample_ids": truncated_ids,
+    }
+
+
+def adapter_diagnostic_metadata(config: Mapping[str, Any]) -> dict[str, Any] | None:
+    adapter_config = as_mapping(config.get("adapter_diagnostic"))
+    if adapter_config:
+        return dict(adapter_config)
+    return None
+
+
 def build_evaluation_artifact(
     records: list[Mapping[str, Any]],
     invalid_rows: list[dict[str, str]] | None = None,
@@ -419,6 +591,7 @@ def build_evaluation_artifact(
 
     retrieval = evaluate_retrieval(records)
     qa = evaluate_qa(records, invalid_predictions)
+    parse = evaluate_parse_status(records, invalid_rows or [])
     project_config = as_mapping(config.get("project"))
     experiment_config = as_mapping(config.get("experiment"))
     record_experiment = first_record_experiment(records)
@@ -449,8 +622,12 @@ def build_evaluation_artifact(
         "predictions_path": str(path) if path else None,
         "predictions_sha256": file_sha256(path) if path and path.exists() else None,
         "split": build_split_metadata(config),
+        "model": build_model_metadata(config, records),
+        "retrieval_config": build_retrieval_config_metadata(config, records),
+        "adapter_diagnostic": adapter_diagnostic_metadata(config),
         "sample_count": len(records),
         "latency_ms": latency_summary(latencies),
+        "parse": parse,
         "retrieval": retrieval,
         "qa": qa,
         "invalid_prediction_count": len(invalid_predictions),

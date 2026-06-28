@@ -180,6 +180,97 @@ def is_mock_run(config: Mapping[str, Any]) -> bool:
     return bool(experiment_config(config).get("mock", True))
 
 
+def model_run_metadata(
+    config: Mapping[str, Any],
+    runtime: BenchmarkRuntime | None = None,
+) -> dict[str, Any]:
+    """Return lightweight model/backend metadata for benchmark artifacts."""
+    model_config = config.get("model", {})
+    vlm = getattr(runtime, "vlm", None) if runtime is not None else None
+    return {
+        "backend": getattr(vlm, "backend", model_config.get("backend", "none")),
+        "name": getattr(vlm, "model_name", model_config.get("name")),
+        "name_env": model_config.get("name_env"),
+        "temperature": getattr(vlm, "temperature", model_config.get("temperature")),
+        "max_new_tokens": getattr(vlm, "max_new_tokens", model_config.get("max_new_tokens")),
+        "include_image": getattr(vlm, "include_image", model_config.get("include_image")),
+    }
+
+
+def retrieval_run_metadata(config: Mapping[str, Any]) -> dict[str, Any]:
+    retrieval_config = config.get("retrieval", {})
+    experiment = experiment_config(config)
+    freeze = config.get("retrieval_freeze", {})
+    return {
+        "strategy": retrieval_strategy(config),
+        "freeze_version": freeze.get("version"),
+        "top_k": retrieval_config.get("top_k"),
+        "example_top_k": retrieval_config.get("example_top_k"),
+        "example_retrieval_mode": experiment.get("example_retrieval_mode"),
+        "text_weight": retrieval_config.get("text_weight"),
+        "image_weight": retrieval_config.get("image_weight"),
+        "fusion_direct_weight": retrieval_config.get("fusion_direct_weight"),
+        "fusion_example_vote_weight": retrieval_config.get("fusion_example_vote_weight"),
+    }
+
+
+def looks_like_invalid_json_error(error: Exception) -> bool:
+    message = str(error).casefold()
+    error_type = type(error).__name__.casefold()
+    return (
+        "json" in message
+        or "json" in error_type
+        or "does not contain a json object" in message
+        or "must contain exactly answer" in message
+        or "response json must be an object" in message
+    )
+
+
+def looks_like_truncated_output(error: Exception | None = None, raw_response: str | None = None) -> bool:
+    text = " ".join(
+        part
+        for part in [
+            str(error) if error is not None else "",
+            raw_response or "",
+        ]
+        if part
+    ).casefold()
+    return any(
+        marker in text
+        for marker in (
+            "truncated",
+            "unterminated",
+            "unexpected end",
+            "eof",
+            "max_new_tokens",
+        )
+    )
+
+
+def parse_success_metadata(prediction: Prediction) -> dict[str, Any]:
+    raw_response = prediction.raw_response
+    return {
+        "status": "success",
+        "success": True,
+        "invalid_json": False,
+        "truncated_output": looks_like_truncated_output(raw_response=raw_response),
+        "raw_response_available": bool(raw_response),
+    }
+
+
+def parse_error_metadata(error: Exception) -> dict[str, Any]:
+    invalid_json = looks_like_invalid_json_error(error)
+    truncated = looks_like_truncated_output(error=error)
+    return {
+        "status": "invalid_json" if invalid_json else "error",
+        "success": False,
+        "invalid_json": invalid_json,
+        "truncated_output": truncated,
+        "raw_response_available": False,
+        "error_type": type(error).__name__,
+    }
+
+
 def demo_model_status(
     config: Mapping[str, Any],
     include_prediction: bool = False,
@@ -459,6 +550,7 @@ def error_benchmark_record(
     config: Mapping[str, Any],
     variant: PromptVariant,
     error: Exception,
+    model_metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     error_type = type(error).__name__
     error_message = str(error)
@@ -498,6 +590,9 @@ def error_benchmark_record(
             "prompt_variant": variant.value,
         },
         "mock": is_mock_run(config),
+        "model": dict(model_metadata or model_run_metadata(config)),
+        "retrieval_config": retrieval_run_metadata(config),
+        "parse": parse_error_metadata(error),
         "predicted_articles": evidence_citations(evidence),
         "prompt": dict(prompt_metadata),
         "diagnostics": diagnostics,
@@ -515,6 +610,7 @@ def build_benchmark_record(
     variant = prompt_variant(config)
     timings_ms: dict[str, float] = {}
     diagnostics: list[dict[str, Any]] = []
+    model_metadata = model_run_metadata(config, runtime=runtime)
 
     retrieval_start = time.perf_counter()
     evidence, _, retrieval_diagnostics = retrieve_for_sample(sample, config, runtime)
@@ -551,6 +647,7 @@ def build_benchmark_record(
                 config=config,
                 variant=variant,
                 error=exc,
+                model_metadata=model_metadata,
             )
     timings_ms["generation"] = (time.perf_counter() - generation_start) * 1000
 
@@ -572,6 +669,9 @@ def build_benchmark_record(
                 "prompt_variant": variant.value,
             },
             "mock": is_mock_run(config),
+            "model": model_metadata,
+            "retrieval_config": retrieval_run_metadata(config),
+            "parse": parse_success_metadata(prediction),
             "predicted_articles": evidence_citations(evidence),
             "prompt": prompt_metadata,
             "diagnostics": diagnostics,
