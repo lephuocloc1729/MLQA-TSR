@@ -42,3 +42,15 @@ sft:
 
 output:
   checkpoint_dir: checkpoints/qlora_adapter
+
+diagnostic:
+  status: diagnostic_not_submission_ready
+  reported_checkpoint_dir: checkpoints/qlora_adapter
+  reported_effective_train_count: 80
+  gpu: RTX 3090 24GB
+  validation_smoke_max_new_tokens: 320
+  known_limitations:
+    - 300-sample run failed with CUDA OOM on RTX 3090 24GB.
+    - Current 80-sample adapter is weak on validation smoke.
+    - Low max_new_tokens causes JSON truncation.
+    - Adapter should not be used as the submission-quality model.
