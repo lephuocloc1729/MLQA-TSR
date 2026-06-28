@@ -242,6 +242,36 @@ checkpoint details and limitations are documented in
 prioritize real baseline validation, frozen retrieval, structured prompting,
 submission/export, and demo polish before investing in larger QLoRA runs.
 
+## Submission Converter
+
+Week 4 includes a task-2 submission converter. It packages internal
+`PipelineResult` JSONL predictions into the benchmark-style JSON where each
+sample keeps its original `id` and receives an `answer`. By default citations
+stay in the internal artifact and are not copied into the submission file.
+
+Dry-run validation checks answer format and, when a public/private template is
+available, required sample coverage:
+
+```bash
+python -m src.submission \
+  --predictions data/outputs/experiments/w4_structured_rag.jsonl \
+  --set-name public_test \
+  --dry-run
+```
+
+Write a submission JSON only after validation is clean:
+
+```bash
+python -m src.submission \
+  --predictions data/outputs/experiments/w4_structured_rag.jsonl \
+  --set-name public_test \
+  --output data/outputs/submissions/w4_public_submission.json
+```
+
+For local smoke checks on incomplete prediction files, use
+`--allow-missing --dry-run`. Do not use missing-answer output as a real
+submission. Generated submissions under `data/outputs/` are ignored by Git.
+
 If plain `pytest` crashes on macOS because of a local `readline` issue, use
 `make test` or `make ci-test`. Both commands inject a lightweight `readline`
 shim before importing pytest.

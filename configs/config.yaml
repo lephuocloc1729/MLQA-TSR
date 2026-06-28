@@ -14,6 +14,8 @@ data:
   public_test_image_dir: data/raw/public_test/public_test_images
 
   private_test_dir: data/raw/private_test
+  private_test_task1_path: data/raw/private_test/Task 1 Submission File/vlsp2025_submission_task1.json
+  private_test_task2_path: data/raw/private_test/Task 2 Submission File/vlsp2025_submission_task2.json
   private_test_image_dir: data/raw/private_test/private_test_images
 
   processed_law_path: data/processed/law_articles.jsonl

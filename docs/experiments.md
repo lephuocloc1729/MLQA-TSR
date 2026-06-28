@@ -399,6 +399,28 @@ Do not turn pending rows into claimed accuracy. Invalid JSON, truncated output,
 unsupported citations, and valid-but-wrong answers should be counted
 separately.
 
+### Submission Export Gate
+
+Convert a prediction JSONL into benchmark task-2 submission JSON only after the
+corresponding metrics artifact is reviewed. The converter validates that
+answers are legal labels and, when `--set-name` or `--required-samples` is
+provided, that required sample IDs are covered.
+
+```bash
+python -m src.submission \
+  --predictions data/outputs/experiments/w4_structured_rag.jsonl \
+  --set-name public_test \
+  --dry-run
+
+python -m src.submission \
+  --predictions data/outputs/experiments/w4_structured_rag.jsonl \
+  --set-name public_test \
+  --output data/outputs/submissions/w4_public_submission.json
+```
+
+Use `--allow-missing --dry-run` only for incomplete smoke artifacts. Missing or
+invalid answers must not be silently replaced with `A` or `Đúng`.
+
 ## Naming
 
 - `B0`: schema/data sanity baseline. Use tiny or oracle-style predictions to
