@@ -421,6 +421,62 @@ python -m src.submission \
 Use `--allow-missing --dry-run` only for incomplete smoke artifacts. Missing or
 invalid answers must not be silently replaced with `A` or `Đúng`.
 
+## Final Defense Reproducibility Pack
+
+Use this checklist before copying any number into the final report or slides.
+
+| Item | Command or source | Required status |
+| --- | --- | --- |
+| Evaluator help | `python -m src.evaluate --help` | command prints CLI help |
+| Submission help | `python -m src.submission --help` | command prints CLI help |
+| Lightweight verification | `make verify` | schema tests, `pip check`, and whitespace check pass |
+| Final report | `docs/report.md` | separates mock, real, and QLoRA diagnostic rows |
+| Slide source | `docs/final-slides.md` | matches the implemented scope and metric sources |
+| Error analysis | `docs/error-analysis.md` | at least 30 cases with stable W4 categories |
+| QLoRA card | `docs/checkpoint-card.md` | describes local adapter metadata and limitations |
+| System card | `docs/model-card.md` | states intended use, risks, and non-legal-advice scope |
+| Demo assets | `docs/assets/` | screenshot or reproducible screenshot command is present |
+
+Metric-source rules:
+
+- Copy retrieval and QA numbers only from metrics JSON artifacts.
+- Keep rows marked `mock=true` in mock/smoke sections.
+- Keep real/base VLM rows pending until `mock=false` metrics JSON exists.
+- Keep QLoRA adapter rows diagnostic unless adapter inference has been run on
+  the locked split with the same evaluation contract.
+- Keep ignored local artifacts, checkpoint weights, private predictions, and
+  bulky outputs outside Git.
+
+Defense-ready command sequence:
+
+```bash
+source .venv/bin/activate
+make qdrant-up
+make preprocess
+python -m src.data_utils --mode split
+make index
+make index-examples
+
+python -m src.pipeline --mode benchmark \
+  --config configs/experiments/w4_structured_rag.yaml \
+  --limit 5
+
+python -m src.evaluate \
+  --config configs/experiments/w4_structured_rag.yaml \
+  --predictions data/outputs/experiments/w4_structured_rag.jsonl
+
+python -m src.submission \
+  --predictions data/outputs/experiments/w4_structured_rag.jsonl \
+  --set-name public_test \
+  --dry-run
+
+bash scripts/demo.sh
+```
+
+The structured RAG benchmark requires a configured real backend. If the backend
+is unavailable, use retrieval-only and cached-prediction demo modes, and keep
+the real metrics table pending.
+
 ## Naming
 
 - `B0`: schema/data sanity baseline. Use tiny or oracle-style predictions to

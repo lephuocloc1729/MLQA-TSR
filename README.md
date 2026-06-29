@@ -281,6 +281,39 @@ For local smoke checks on incomplete prediction files, use
 `--allow-missing --dry-run`. Do not use missing-answer output as a real
 submission. Generated submissions under `data/outputs/` are ignored by Git.
 
+## Final Report And Defense Pack
+
+Week 4 final documentation is organized for defense and reproducibility:
+
+- [`docs/report.md`](docs/report.md): final course report with scope, dataset,
+  architecture, experiments, limitations, ethics, member contributions, and
+  four-month continuation plan.
+- [`docs/experiments.md`](docs/experiments.md): experiment contract, metric
+  source rules, final validation commands, and submission export gate.
+- [`docs/error-analysis.md`](docs/error-analysis.md): 30 categorized retrieval
+  and model hard cases.
+- [`docs/checkpoint-card.md`](docs/checkpoint-card.md): QLoRA diagnostic
+  checkpoint card and limitations.
+- [`docs/model-card.md`](docs/model-card.md): system model card for the main
+  retrieval-grounded prototype.
+- [`docs/final-slides.md`](docs/final-slides.md): slide source for the final
+  presentation.
+- [`docs/assets/`](docs/assets/): screenshot/asset notes for the demo.
+
+Before reporting any number, verify that it comes from a metrics JSON artifact
+or a documented local GPU smoke log. Mock rows must stay labeled as smoke
+checks, and QLoRA must stay labeled as diagnostic unless a comparable
+locked-validation artifact proves otherwise.
+
+Final smoke verification:
+
+```bash
+python -m src.evaluate --help
+python -m src.submission --help
+make verify
+git diff --check
+```
+
 If plain `pytest` crashes on macOS because of a local `readline` issue, use
 `make test` or `make ci-test`. Both commands inject a lightweight `readline`
 shim before importing pytest.
