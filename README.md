@@ -281,6 +281,50 @@ For local smoke checks on incomplete prediction files, use
 `--allow-missing --dry-run`. Do not use missing-answer output as a real
 submission. Generated submissions under `data/outputs/` are ignored by Git.
 
+## VLSP Post-Submission Package
+
+Week 5 adds the exact VLSP post-submission packager for both subtasks. It
+validates coverage and labels, writes the required filenames, and creates a zip
+with exactly two top-level files:
+
+```text
+submission_task1.json
+submission_task2.json
+submission.zip
+```
+
+Dry-run an incomplete smoke artifact without writing files:
+
+```bash
+python -m src.competition_submission \
+  --set-name public_test \
+  --task both \
+  --task1-predictions tests/fixtures/tiny_task1_predictions.jsonl \
+  --task2-predictions tests/fixtures/tiny_predictions.jsonl \
+  --allow-missing \
+  --dry-run
+```
+
+Build a real private-test package only after both prediction files cover every
+required ID:
+
+```bash
+python -m src.competition_submission \
+  --set-name private_test \
+  --task both \
+  --task1-predictions data/outputs/competitions/private_task1_predictions.jsonl \
+  --task2-predictions data/outputs/competitions/private_task2_predictions.jsonl \
+  --output-dir data/outputs/submissions/vlsp_private
+
+python -m src.competition_submission \
+  --pack data/outputs/submissions/vlsp_private \
+  --output data/outputs/submissions/submission.zip
+```
+
+The packager does not fill missing answers with default labels. Task 1 rows
+contain `relevant_articles` and no `answer`; Task 2 rows contain both
+`relevant_articles` and a legal `answer`.
+
 ## Final Report And Defense Pack
 
 Week 4 final documentation is organized for defense and reproducibility:
