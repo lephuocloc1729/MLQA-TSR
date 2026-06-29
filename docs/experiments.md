@@ -421,6 +421,49 @@ python -m src.submission \
 Use `--allow-missing --dry-run` only for incomplete smoke artifacts. Missing or
 invalid answers must not be silently replaced with `A` or `Đúng`.
 
+### VLSP Post-Submission Package
+
+The official post-submission system expects exactly these names:
+
+```text
+submission_task1.json
+submission_task2.json
+submission.zip
+```
+
+Use `src.competition_submission` for the final packaging gate. It validates
+Task 1 retrieval citations, Task 2 answers plus citations, public/private ID
+coverage, and the final zip entries.
+
+```bash
+python -m src.competition_submission \
+  --set-name private_test \
+  --task both \
+  --task1-predictions data/outputs/competitions/private_task1_predictions.jsonl \
+  --task2-predictions data/outputs/competitions/private_task2_predictions.jsonl \
+  --output-dir data/outputs/submissions/vlsp_private
+
+python -m src.competition_submission \
+  --pack data/outputs/submissions/vlsp_private \
+  --output data/outputs/submissions/submission.zip
+```
+
+For smoke checks with partial predictions, the only accepted missing-ID mode is:
+
+```bash
+python -m src.competition_submission \
+  --set-name public_test \
+  --task both \
+  --task1-predictions tests/fixtures/tiny_task1_predictions.jsonl \
+  --task2-predictions tests/fixtures/tiny_predictions.jsonl \
+  --allow-missing \
+  --dry-run
+```
+
+Do not report or submit outputs produced from missing-ID dry runs. The real
+submission zip must contain exactly `submission_task1.json` and
+`submission_task2.json` at the top level.
+
 ## Final Defense Reproducibility Pack
 
 Use this checklist before copying any number into the final report or slides.

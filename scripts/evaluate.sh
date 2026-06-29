@@ -52,6 +52,9 @@ PY
 elif [ "$1" = "submission" ]; then
   shift
   python -m src.submission "$@"
+elif [ "$1" = "competition-submission" ]; then
+  shift
+  python -m src.competition_submission "$@"
 else
   python -m src.evaluate "$@"
 fi
