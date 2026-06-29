@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Any, Mapping
 
-from src.data_utils import load_split_samples
+from src.data_utils import load_split_samples, load_vlsp_test_samples
 from src.evaluate import extract_sample_id, read_prediction_jsonl
 from src.prompts import PromptVariant, normalize_prompt_variant
 from src.retrieval import (
@@ -29,7 +29,9 @@ from src.vlm import LegalQAVLM
 
 
 EXPERIMENT_SCHEMA_VERSION = "w2-ablation-v1"
+VLSP_TEST_SCHEMA_VERSION = "vlsp-test-v1"
 DEFAULT_EXPERIMENT_DIR = "data/outputs/experiments"
+DEFAULT_COMPETITION_DIR = "data/outputs/competitions"
 DEMO_SCHEMA_VERSION = "demo-inspection-v1"
 DEMO_DISCLAIMER = (
     "Demo phục vụ nghiên cứu/giáo dục và hỗ trợ tra cứu. Kết quả không phải "
@@ -136,6 +138,16 @@ def assert_locked_validation_split(configs: list[Mapping[str, Any]]) -> dict[str
 def load_benchmark_samples(config: Mapping[str, Any], limit: int | None = None) -> list[dict]:
     split = str(experiment_config(config).get("split", "val"))
     samples = load_split_samples(dict(config), split)
+    return samples[:limit] if limit is not None else samples
+
+
+def load_vlsp_samples(
+    config: Mapping[str, Any],
+    set_name: str,
+    task: str,
+    limit: int | None = None,
+) -> list[dict]:
+    samples = load_vlsp_test_samples(config, set_name=set_name, task=task)
     return samples[:limit] if limit is not None else samples
 
 
@@ -618,6 +630,15 @@ def mock_prediction(query: Query, evidence: list[Evidence]) -> Prediction:
     )
 
 
+def disable_model_backend(config: Mapping[str, Any]) -> dict[str, Any]:
+    local_config = dict(config)
+    local_config["model"] = {
+        **dict(config.get("model", {})),
+        "backend": "none",
+    }
+    return local_config
+
+
 def retrieve_for_sample(
     sample: dict[str, Any],
     config: Mapping[str, Any],
@@ -656,6 +677,169 @@ def retrieve_for_sample(
         ),
     )
     return fused.evidence, [], list(fused.diagnostics)
+
+
+def vlsp_output_path(
+    config: Mapping[str, Any],
+    set_name: str,
+    task: str,
+    output_path: str | Path | None = None,
+) -> Path:
+    if output_path:
+        return Path(output_path)
+    experiment = experiment_config(config)
+    if experiment.get("output_path"):
+        return Path(str(experiment["output_path"]))
+    return Path(DEFAULT_COMPETITION_DIR) / f"{set_name}_{task}_predictions.jsonl"
+
+
+def ensure_vlsp_task(task: str) -> str:
+    if task not in {"task1", "task2"}:
+        raise ValueError("task must be one of: task1, task2")
+    return task
+
+
+def ensure_vlsp_set_name(set_name: str) -> str:
+    if set_name not in {"public_test", "private_test"}:
+        raise ValueError("set_name must be one of: public_test, private_test")
+    return set_name
+
+
+def validate_vlsp_task2_config(config: Mapping[str, Any]) -> None:
+    if is_mock_run(config):
+        return
+    model_config = config.get("model", {})
+    if not bool(model_config.get("include_image", False)):
+        raise RuntimeError("VLSP Task 2 real runs require model.include_image=true")
+
+
+def vlsp_task1_record(
+    sample: dict[str, Any],
+    evidence: list[Evidence],
+    timings_ms: Mapping[str, float],
+    config: Mapping[str, Any],
+    set_name: str,
+    diagnostics: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    query = Query.model_validate(sample)
+    citations = evidence_citations(evidence)
+    return {
+        "schema_version": VLSP_TEST_SCHEMA_VERSION,
+        "task": "task1",
+        "set_name": set_name,
+        "id": query.id,
+        "image_id": query.image_id,
+        "image_path": query.image_path,
+        "question": query.question,
+        "query": query.model_dump(mode="json", exclude={"answer", "relevant_articles"}),
+        "relevant_articles": citations,
+        "predicted_articles": citations,
+        "evidence": [item.model_dump(mode="json") for item in evidence],
+        "timings_ms": dict(timings_ms),
+        "experiment": {
+            "name": experiment_name(config),
+            "label": experiment_config(config).get("label"),
+            "mock": True,
+            "retrieval_strategy": retrieval_strategy(config),
+            "prompt_variant": None,
+        },
+        "mock": True,
+        "model": {"backend": "none", "name": None, "include_image": False},
+        "retrieval_config": retrieval_run_metadata(config),
+        "parse": None,
+        "diagnostics": list(diagnostics or []),
+        "created_at": utc_now_iso(),
+    }
+
+
+def build_vlsp_task1_record(
+    sample: dict[str, Any],
+    config: Mapping[str, Any],
+    set_name: str,
+    runtime: BenchmarkRuntime | None = None,
+) -> dict[str, Any]:
+    runtime = runtime or BenchmarkRuntime(disable_model_backend(config))
+    timings_ms: dict[str, float] = {}
+    retrieval_start = time.perf_counter()
+    evidence, _, diagnostics = retrieve_for_sample(sample, config, runtime)
+    timings_ms["retrieval"] = (time.perf_counter() - retrieval_start) * 1000
+    return vlsp_task1_record(
+        sample=sample,
+        evidence=evidence,
+        timings_ms=timings_ms,
+        config=config,
+        set_name=set_name,
+        diagnostics=diagnostics,
+    )
+
+
+def build_vlsp_task2_record(
+    sample: dict[str, Any],
+    config: Mapping[str, Any],
+    set_name: str,
+    runtime: BenchmarkRuntime | None = None,
+) -> dict[str, Any]:
+    runtime_config = disable_model_backend(config) if is_mock_run(config) else dict(config)
+    runtime = runtime or BenchmarkRuntime(runtime_config)
+    row = build_benchmark_record(sample, config, runtime=runtime)
+    row.update(
+        {
+            "vlsp_schema_version": VLSP_TEST_SCHEMA_VERSION,
+            "task": "task2",
+            "set_name": set_name,
+        }
+    )
+    return row
+
+
+def build_vlsp_test_record(
+    sample: dict[str, Any],
+    config: Mapping[str, Any],
+    set_name: str,
+    task: str,
+    runtime: BenchmarkRuntime | None = None,
+) -> dict[str, Any]:
+    task = ensure_vlsp_task(task)
+    if task == "task1":
+        return build_vlsp_task1_record(sample, config, set_name=set_name, runtime=runtime)
+    return build_vlsp_task2_record(sample, config, set_name=set_name, runtime=runtime)
+
+
+def run_vlsp_test(
+    config: Mapping[str, Any],
+    set_name: str,
+    task: str,
+    limit: int | None = None,
+    output_path: str | Path | None = None,
+    runtime: BenchmarkRuntime | None = None,
+) -> Path:
+    set_name = ensure_vlsp_set_name(set_name)
+    task = ensure_vlsp_task(task)
+    if task == "task2":
+        validate_vlsp_task2_config(config)
+
+    if runtime is None:
+        runtime_config = (
+            disable_model_backend(config)
+            if task == "task1" or (task == "task2" and is_mock_run(config))
+            else dict(config)
+        )
+        runtime = BenchmarkRuntime(runtime_config)
+
+    samples = load_vlsp_samples(config, set_name=set_name, task=task, limit=limit)
+    rows = [
+        build_vlsp_test_record(
+            sample,
+            config,
+            set_name=set_name,
+            task=task,
+            runtime=runtime,
+        )
+        for sample in samples
+    ]
+    path = vlsp_output_path(config, set_name=set_name, task=task, output_path=output_path)
+    write_jsonl(rows, str(path))
+    return path
 
 
 def build_demo_inspection(
@@ -983,7 +1167,9 @@ def parse_args() -> argparse.Namespace:
         description="Experiment pipeline runner for traffic-legal-vlm."
     )
     parser.add_argument("--config", default="configs/config.yaml")
-    parser.add_argument("--mode", choices=["benchmark"], default="benchmark")
+    parser.add_argument("--mode", choices=["benchmark", "vlsp-test"], default="benchmark")
+    parser.add_argument("--set-name", choices=["public_test", "private_test"], default="public_test")
+    parser.add_argument("--task", choices=["task1", "task2"], default="task2")
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--output", default=None)
     return parser.parse_args()
@@ -1001,6 +1187,31 @@ def main() -> None:
             json.dumps(
                 {
                     "mode": "benchmark",
+                    "config_name": experiment_name(config),
+                    "mock": is_mock_run(config),
+                    "output_path": str(output_path),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    elif args.mode == "vlsp-test":
+        try:
+            output_path = run_vlsp_test(
+                config,
+                set_name=args.set_name,
+                task=args.task,
+                limit=args.limit,
+                output_path=args.output,
+            )
+        except (FileNotFoundError, RuntimeError, ValueError) as exc:
+            raise SystemExit(f"ERROR: {exc}") from None
+        print(
+            json.dumps(
+                {
+                    "mode": "vlsp-test",
+                    "set_name": args.set_name,
+                    "task": args.task,
                     "config_name": experiment_name(config),
                     "mock": is_mock_run(config),
                     "output_path": str(output_path),

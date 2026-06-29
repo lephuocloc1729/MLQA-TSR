@@ -325,6 +325,36 @@ The packager does not fill missing answers with default labels. Task 1 rows
 contain `relevant_articles` and no `answer`; Task 2 rows contain both
 `relevant_articles` and a legal `answer`.
 
+## VLSP Public/Private Test Runner
+
+Generate public/private prediction JSONL artifacts before packaging. Task 1 is
+retrieval-only and never calls the VLM:
+
+```bash
+python -m src.pipeline \
+  --mode vlsp-test \
+  --set-name private_test \
+  --task task1 \
+  --config configs/experiments/vlsp_task1_retrieval.yaml \
+  --output data/outputs/competitions/private_task1_predictions.jsonl
+```
+
+Task 2 runs retrieval plus the configured model. The real config requires an
+OpenAI-compatible backend and image input:
+
+```bash
+python -m src.pipeline \
+  --mode vlsp-test \
+  --set-name private_test \
+  --task task2 \
+  --config configs/experiments/vlsp_task2_structured_real.yaml \
+  --output data/outputs/competitions/private_task2_predictions.jsonl
+```
+
+Use `--limit 5` for smoke runs. If credentials are missing, real Task 2 runs
+fail before generating fake answers. Mock runs are allowed only for plumbing
+checks and stay labeled with `mock=true` in the artifact.
+
 ## Final Report And Defense Pack
 
 Week 4 final documentation is organized for defense and reproducibility:
