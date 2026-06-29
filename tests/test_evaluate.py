@@ -156,6 +156,7 @@ def test_w3_artifact_includes_model_parse_retrieval_and_adapter_metadata():
                 "include_image": True,
                 "max_retries": 2,
                 "serving": "openai-compatible",
+                "generation_config": "vllm",
                 "gpu_host": "2xRTX3090-vLLM",
                 "gpu_host_env": "QWEN_VL_GPU_HOST",
                 "dtype": "float16",
@@ -183,6 +184,7 @@ def test_w3_artifact_includes_model_parse_retrieval_and_adapter_metadata():
     assert artifact["model"]["name"] == "qwen2.5-vl-local"
     assert artifact["model"]["max_new_tokens"] == 320
     assert artifact["model"]["max_retries"] == 2
+    assert artifact["model"]["generation_config"] == "vllm"
     assert artifact["model"]["gpu_host"] == "2xRTX3090-vLLM"
     assert artifact["model"]["dtype"] == "float16"
     assert artifact["retrieval_config"]["strategy"] == "fusion"

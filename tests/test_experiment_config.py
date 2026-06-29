@@ -218,6 +218,7 @@ def test_week5_qwen_model_metadata_records_serving_details(monkeypatch):
     assert metadata["max_new_tokens"] == 512
     assert metadata["max_retries"] == 2
     assert metadata["serving"] == "openai-compatible"
+    assert metadata["generation_config"] == "vllm"
     assert metadata["gpu_host"] == "rtx3090-box"
     assert metadata["gpu_host_env"] == "QWEN_VL_GPU_HOST"
     assert metadata["dtype"] == "float16"

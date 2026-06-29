@@ -241,6 +241,7 @@ def model_run_metadata(
         "include_image": getattr(vlm, "include_image", model_config.get("include_image")),
         "max_retries": model_config.get("max_retries"),
         "serving": model_config.get("serving"),
+        "generation_config": model_config.get("generation_config"),
         "gpu_host": (
             os.environ.get(str(gpu_host_env))
             if gpu_host_env
