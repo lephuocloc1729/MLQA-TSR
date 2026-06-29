@@ -118,10 +118,24 @@ Recorded validation-smoke observations:
 
 - `max_new_tokens=160`: many outputs were truncated and could not be parsed
   reliably as JSON.
-- `max_new_tokens=320`: 3-sample validation smoke reached `1/3` exact match.
+- `max_new_tokens=320`: 3-sample validation smoke reached `1/3` exact match
+  in `data/outputs/gpu_smoke/adapter_val_smoke_320.jsonl`.
 
 These observations are not leaderboard-quality validation metrics. They should
 be used to guide week-4 adapter diagnostics and parser/truncation accounting.
+
+## Evidence Trail
+
+| Claim | Local source |
+| --- | --- |
+| 80-sample adapter metadata exists | `checkpoints/qlora_adapter/adapter_metadata.json` |
+| 20-sample smoke adapter exists | `checkpoints/qlora_adapter_smoke20/adapter_metadata.json` |
+| Low-token validation smoke had truncated raw outputs | `data/outputs/gpu_smoke/adapter_val_smoke.jsonl` |
+| Safer 320-token validation smoke reached `1/3` exact match | `data/outputs/gpu_smoke/adapter_val_smoke_320.jsonl` |
+| 300-sample run exceeded RTX 3090 24GB memory | trainer/GPU run log; summarize in report, do not report as metric |
+
+The checkpoint and GPU-smoke paths above are intentionally ignored by Git. The
+report should summarize them, not commit the generated model files.
 
 ## Known Limitations
 
