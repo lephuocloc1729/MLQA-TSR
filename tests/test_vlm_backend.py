@@ -3,10 +3,16 @@ import json
 import pytest
 from PIL import Image
 
+from src import vlm
 from src.evaluate import build_evaluation_artifact
 from src.schemas import Evidence, Query
 from src.utils import load_config
-from src.vlm import LegalQAVLM, chat_completions_endpoint, create_vlm_client
+from src.vlm import (
+    LegalQAVLM,
+    OpenAICompatibleClient,
+    chat_completions_endpoint,
+    create_vlm_client,
+)
 
 
 LAW_ID = "QCVN 41:2024/BGTVT"
@@ -138,6 +144,49 @@ def test_chat_completions_endpoint_normalization():
         chat_completions_endpoint("http://localhost:8000/v1/chat/completions")
         == "http://localhost:8000/v1/chat/completions"
     )
+
+
+def test_openai_compatible_client_retries_empty_response(monkeypatch):
+    calls = []
+    responses = [
+        {"choices": [{"message": {"content": ""}}]},
+        {"choices": [{"message": {"content": response()}}]},
+    ]
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return json.dumps(self.payload).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        calls.append((request, timeout))
+        return FakeResponse(responses.pop(0))
+
+    monkeypatch.setattr(vlm.urllib.request, "urlopen", fake_urlopen)
+    client = OpenAICompatibleClient(
+        base_url="http://localhost:8000/v1",
+        api_key="test-key",
+        max_retries=1,
+        retry_sleep_seconds=0,
+    )
+
+    raw = client.generate(
+        messages=[{"role": "user", "content": "Return JSON."}],
+        model_name="mock-vlm",
+        temperature=0.0,
+        max_new_tokens=128,
+    )
+
+    assert json.loads(raw)["answer"] == "B"
+    assert len(calls) == 2
 
 
 def test_metrics_artifact_marks_non_mock_run():

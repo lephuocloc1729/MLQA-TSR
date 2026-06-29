@@ -26,6 +26,8 @@ model:
   max_new_tokens: 512
   include_image: true
   request_timeout_seconds: 180
+  max_retries: 2
+  retry_sleep_seconds: 0.5
 
 prompt:
   variant: structured_legal_rag

@@ -216,6 +216,7 @@ def test_week5_qwen_model_metadata_records_serving_details(monkeypatch):
     assert metadata["name"] == "Qwen/Qwen2.5-VL-7B-Instruct"
     assert metadata["include_image"] is True
     assert metadata["max_new_tokens"] == 512
+    assert metadata["max_retries"] == 2
     assert metadata["serving"] == "openai-compatible"
     assert metadata["gpu_host"] == "rtx3090-box"
     assert metadata["gpu_host_env"] == "QWEN_VL_GPU_HOST"

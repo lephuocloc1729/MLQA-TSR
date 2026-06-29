@@ -239,6 +239,7 @@ def model_run_metadata(
         "temperature": getattr(vlm, "temperature", model_config.get("temperature")),
         "max_new_tokens": getattr(vlm, "max_new_tokens", model_config.get("max_new_tokens")),
         "include_image": getattr(vlm, "include_image", model_config.get("include_image")),
+        "max_retries": model_config.get("max_retries"),
         "serving": model_config.get("serving"),
         "gpu_host": (
             os.environ.get(str(gpu_host_env))
