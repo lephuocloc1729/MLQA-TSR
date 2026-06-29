@@ -20,7 +20,7 @@ model:
   base_url_env: OPENAI_COMPATIBLE_BASE_URL
   gpu_host_env: QWEN_VL_GPU_HOST
   serving: openai-compatible
-  dtype: bfloat16
+  dtype: float16
   quantization: none
   temperature: 0.0
   max_new_tokens: 512

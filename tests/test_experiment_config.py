@@ -219,7 +219,7 @@ def test_week5_qwen_model_metadata_records_serving_details(monkeypatch):
     assert metadata["serving"] == "openai-compatible"
     assert metadata["gpu_host"] == "rtx3090-box"
     assert metadata["gpu_host_env"] == "QWEN_VL_GPU_HOST"
-    assert metadata["dtype"] == "bfloat16"
+    assert metadata["dtype"] == "float16"
     assert metadata["quantization"] == "none"
 
 
