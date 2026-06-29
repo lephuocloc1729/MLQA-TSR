@@ -5,6 +5,7 @@ from PIL import Image
 
 from src.evaluate import build_evaluation_artifact
 from src.schemas import Evidence, Query
+from src.utils import load_config
 from src.vlm import LegalQAVLM, chat_completions_endpoint, create_vlm_client
 
 
@@ -119,6 +120,13 @@ def test_missing_openai_compatible_base_url_error_is_helpful():
             },
             environ={"KEY_ENV": "secret"},
         )
+
+
+def test_week5_qwen_config_missing_credentials_error_is_helpful():
+    config = load_config("configs/experiments/vlsp_task2_qwen25vl_7b.yaml")
+
+    with pytest.raises(RuntimeError, match="OPENAI_COMPATIBLE_API_KEY"):
+        create_vlm_client(config["model"], environ={})
 
 
 def test_chat_completions_endpoint_normalization():

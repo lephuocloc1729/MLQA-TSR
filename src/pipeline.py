@@ -231,6 +231,7 @@ def model_run_metadata(
     """Return lightweight model/backend metadata for benchmark artifacts."""
     model_config = config.get("model", {})
     vlm = getattr(runtime, "vlm", None) if runtime is not None else None
+    gpu_host_env = model_config.get("gpu_host_env")
     return {
         "backend": getattr(vlm, "backend", model_config.get("backend", "none")),
         "name": getattr(vlm, "model_name", model_config.get("name")),
@@ -238,6 +239,15 @@ def model_run_metadata(
         "temperature": getattr(vlm, "temperature", model_config.get("temperature")),
         "max_new_tokens": getattr(vlm, "max_new_tokens", model_config.get("max_new_tokens")),
         "include_image": getattr(vlm, "include_image", model_config.get("include_image")),
+        "serving": model_config.get("serving"),
+        "gpu_host": (
+            os.environ.get(str(gpu_host_env))
+            if gpu_host_env
+            else model_config.get("gpu_host")
+        ),
+        "gpu_host_env": gpu_host_env,
+        "dtype": model_config.get("dtype"),
+        "quantization": model_config.get("quantization"),
     }
 
 

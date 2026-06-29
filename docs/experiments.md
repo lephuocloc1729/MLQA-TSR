@@ -498,6 +498,55 @@ Real Task 2 rows must be `mock=false` and include `model.include_image=true`.
 If the configured backend is missing credentials, the runner fails before a
 full expensive run instead of writing default answers.
 
+### W5 Real Qwen2.5-VL Benchmark
+
+The preferred post-submission QA backend is
+`Qwen/Qwen2.5-VL-7B-Instruct` served through an OpenAI-compatible endpoint. Use
+`Qwen/Qwen2.5-VL-3B-Instruct` only as a documented fallback if the 7B endpoint
+is unstable, too slow, or out of memory on the available GPU.
+
+Environment variables:
+
+```bash
+export OPENAI_COMPATIBLE_BASE_URL="http://<gpu-host>:8000/v1"
+export OPENAI_COMPATIBLE_API_KEY="<token-or-placeholder-required-by-server>"
+export OPENAI_COMPATIBLE_MODEL="Qwen/Qwen2.5-VL-7B-Instruct"
+export QWEN_VL_GPU_HOST="<gpu-host-label>"
+```
+
+Staged run plan:
+
+```bash
+# 1. Connectivity and image-message smoke
+python -m src.pipeline \
+  --mode benchmark \
+  --config configs/experiments/vlsp_task2_qwen25vl_7b.yaml \
+  --limit 1
+
+# 2. Parse/citation smoke before spending a full run
+bash scripts/evaluate.sh run-w5-qwen 10 \
+  configs/experiments/vlsp_task2_qwen25vl_7b.yaml
+
+# 3. Full locked validation only after the 10-sample smoke is stable
+bash scripts/evaluate.sh run-w5-qwen full \
+  configs/experiments/vlsp_task2_qwen25vl_7b.yaml
+```
+
+If 7B fails, switch both the config and model environment variable, then record
+the exact fallback reason before reporting numbers:
+
+```bash
+export OPENAI_COMPATIBLE_MODEL="Qwen/Qwen2.5-VL-3B-Instruct"
+bash scripts/evaluate.sh run-w5-qwen 10 \
+  configs/experiments/vlsp_task2_qwen25vl_3b.yaml
+```
+
+Every reported real row must point to a `mock=false` metrics artifact under
+`data/outputs/experiments/`. The artifact records backend/model name,
+`include_image`, `max_new_tokens`, GPU host label, dtype, quantization, latency,
+parse success, invalid JSON, truncation, and error IDs. Do not submit
+public/private predictions until the locked-validation smoke is stable.
+
 ## Final Defense Reproducibility Pack
 
 Use this checklist before copying any number into the final report or slides.

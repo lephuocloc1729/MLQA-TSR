@@ -8,6 +8,7 @@ from src.pipeline import (
     build_benchmark_record,
     benchmark_output_path,
     locked_split_identity,
+    model_run_metadata,
 )
 from src.utils import load_config
 
@@ -27,6 +28,10 @@ W4_FINAL_VALIDATION_CONFIGS = [
     "configs/experiments/w4_retrieval_only.yaml",
     "configs/experiments/w4_text_rag_real.yaml",
     "configs/experiments/w4_structured_rag.yaml",
+]
+W5_QWEN_CONFIGS = [
+    "configs/experiments/vlsp_task2_qwen25vl_7b.yaml",
+    "configs/experiments/vlsp_task2_qwen25vl_3b.yaml",
 ]
 
 
@@ -173,6 +178,49 @@ def test_week4_adapter_diagnostic_is_non_final_but_uses_locked_validation_paths(
     assert config["experiment"]["retrieval_strategy"] == "oracle"
     assert config["adapter_diagnostic"]["status"] == "diagnostic_not_submission_ready"
     assert config["adapter_diagnostic"]["max_new_tokens"] == 320
+
+
+def test_week5_qwen_real_vlm_configs_load_with_image_metadata():
+    configs = [load_config(path) for path in W5_QWEN_CONFIGS]
+
+    identity = assert_locked_validation_split(configs)
+
+    assert identity["split"] == "val"
+    assert identity["split_path"] == "data/processed/val_split.jsonl"
+    assert [config["experiment"]["name"] for config in configs] == [
+        "vlsp_task2_qwen25vl_7b",
+        "vlsp_task2_qwen25vl_3b",
+    ]
+    assert all(config["experiment"]["mock"] is False for config in configs)
+    assert all(config["model"]["include_image"] is True for config in configs)
+    assert all(config["model"]["max_new_tokens"] == 512 for config in configs)
+    assert all(config["model"]["temperature"] == 0.0 for config in configs)
+    assert configs[0]["model"]["name"] == "Qwen/Qwen2.5-VL-7B-Instruct"
+    assert configs[1]["model"]["name"] == "Qwen/Qwen2.5-VL-3B-Instruct"
+    assert configs[0]["w5_real_vlm"]["preferred_model"] is True
+    assert configs[1]["w5_real_vlm"]["fallback_reason_required"] is True
+    assert configs[0]["experiment"]["prompt_variant"] == "structured_legal_rag"
+    assert configs[0]["retrieval"]["fusion_allow_example_failure"] is True
+    assert benchmark_output_path(configs[0]) == Path(
+        "data/outputs/experiments/vlsp_task2_qwen25vl_7b.jsonl"
+    )
+
+
+def test_week5_qwen_model_metadata_records_serving_details(monkeypatch):
+    monkeypatch.setenv("QWEN_VL_GPU_HOST", "rtx3090-box")
+    config = load_config("configs/experiments/vlsp_task2_qwen25vl_7b.yaml")
+
+    metadata = model_run_metadata(config)
+
+    assert metadata["backend"] == "openai_compatible"
+    assert metadata["name"] == "Qwen/Qwen2.5-VL-7B-Instruct"
+    assert metadata["include_image"] is True
+    assert metadata["max_new_tokens"] == 512
+    assert metadata["serving"] == "openai-compatible"
+    assert metadata["gpu_host"] == "rtx3090-box"
+    assert metadata["gpu_host_env"] == "QWEN_VL_GPU_HOST"
+    assert metadata["dtype"] == "bfloat16"
+    assert metadata["quantization"] == "none"
 
 
 def test_split_drift_is_rejected_unless_explicitly_overridden():
