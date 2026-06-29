@@ -431,6 +431,15 @@ def build_model_metadata(
             model_config.get("max_new_tokens"),
         ),
         "include_image": record_model.get("include_image", model_config.get("include_image")),
+        "max_retries": record_model.get("max_retries", model_config.get("max_retries")),
+        "serving": record_model.get("serving", model_config.get("serving")),
+        "gpu_host": record_model.get("gpu_host", model_config.get("gpu_host")),
+        "gpu_host_env": record_model.get("gpu_host_env", model_config.get("gpu_host_env")),
+        "dtype": record_model.get("dtype", model_config.get("dtype")),
+        "quantization": record_model.get(
+            "quantization",
+            model_config.get("quantization"),
+        ),
     }
 
 
