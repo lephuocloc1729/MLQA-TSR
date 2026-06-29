@@ -199,6 +199,102 @@ def attach_train_image_path(sample: Mapping, config: dict) -> dict:
     return normalized
 
 
+def _image_path_from_id(image_dir: str | Path, image_id: str) -> Path:
+    image_path = Path(image_dir).joinpath(str(image_id))
+    return image_path if image_path.suffix else image_path.with_suffix(".jpg")
+
+
+def attach_test_image_path(sample: Mapping[str, Any], image_dir: str | Path) -> dict:
+    """Attach a public/private test image path and fail clearly if it is missing."""
+    normalized = copy.deepcopy(dict(sample))
+    image_id = _normalize_text(normalized.get("image_id", ""))
+    if not image_id:
+        raise ValueError("VLSP test sample is missing image_id and cannot resolve image_path")
+
+    image_path = Path(str(normalized.get("image_path") or _image_path_from_id(image_dir, image_id)))
+    if not image_path.exists():
+        sample_id = normalized.get("id") or image_id
+        raise FileNotFoundError(
+            f"VLSP test image not found for sample {sample_id!r}: {image_path}"
+        )
+    normalized["image_path"] = str(image_path)
+    return normalized
+
+
+def test_samples_path(config: Mapping[str, Any], set_name: str, task: str) -> Path:
+    if set_name not in {"public_test", "private_test"}:
+        raise ValueError("set_name must be one of: public_test, private_test")
+    if task not in {"task1", "task2"}:
+        raise ValueError("task must be one of: task1, task2")
+
+    data_config = config.get("data", {})
+    if set_name == "public_test":
+        key = "public_test_task1_path" if task == "task1" else "public_test_task2_path"
+        path = data_config.get(key)
+        if not path:
+            raise KeyError(f"Missing data.{key} in config")
+        return Path(str(path))
+
+    key = "private_test_task1_path" if task == "task1" else "private_test_task2_path"
+    path = data_config.get(key)
+    if not path:
+        private_dir = Path(str(data_config.get("private_test_dir", "data/raw/private_test")))
+        filename = (
+            "vlsp2025_submission_task1.json"
+            if task == "task1"
+            else "vlsp2025_submission_task2.json"
+        )
+        folder = "Task 1 Submission File" if task == "task1" else "Task 2 Submission File"
+        path = private_dir / folder / filename
+    return Path(str(path))
+
+
+def test_image_dir(config: Mapping[str, Any], set_name: str) -> Path:
+    if set_name not in {"public_test", "private_test"}:
+        raise ValueError("set_name must be one of: public_test, private_test")
+    data_config = config.get("data", {})
+    key = "public_test_image_dir" if set_name == "public_test" else "private_test_image_dir"
+    image_dir = data_config.get(key)
+    if not image_dir:
+        raise KeyError(f"Missing data.{key} in config")
+    return Path(str(image_dir))
+
+
+def normalize_vlsp_test_sample(
+    sample: Mapping[str, Any],
+    image_dir: str | Path,
+) -> dict:
+    """Normalize public/private test samples without carrying gold labels."""
+    normalized = attach_test_image_path(sample, image_dir)
+    # Public/private templates may contain helper fields such as relevant_articles.
+    # Retrieval/QA test runs must predict those fields instead of depending on them.
+    normalized.pop("answer", None)
+    normalized.pop("relevant_articles", None)
+    query = Query.model_validate(normalized)
+    return query.model_dump(
+        mode="json",
+        exclude_none=True,
+        exclude={"answer", "relevant_articles"},
+    )
+
+
+def load_vlsp_test_samples(config: Mapping[str, Any], set_name: str, task: str) -> list[dict]:
+    path = test_samples_path(config, set_name=set_name, task=task)
+    if not path.exists():
+        raise FileNotFoundError(f"VLSP {set_name} {task} file not found: {path}")
+
+    raw_samples = read_json(str(path))
+    if not isinstance(raw_samples, list):
+        raise ValueError(f"VLSP {set_name} {task} file must contain a list of samples")
+
+    image_dir = test_image_dir(config, set_name=set_name)
+    samples = [normalize_vlsp_test_sample(sample, image_dir) for sample in raw_samples]
+    sample_ids = [sample["id"] for sample in samples if sample.get("id")]
+    if len(sample_ids) != len(set(sample_ids)):
+        raise ValueError(f"VLSP {set_name} {task} contains duplicate sample IDs")
+    return samples
+
+
 def get_law_article(
     law_id: str,
     article_id: str,

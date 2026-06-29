@@ -1,0 +1,18 @@
+extends: ../config.yaml
+
+experiment:
+  name: vlsp_task1_retrieval
+  label: VLSP_Task1_Retrieval
+  description: Retrieval-only predictions for VLSP Task 1 public/private tests.
+  mock: true
+  retrieval_strategy: text
+  prompt_variant: text_rag
+  output_path: data/outputs/competitions/vlsp_task1_predictions.jsonl
+
+retrieval:
+  top_k: 5
+
+model:
+  backend: none
+  include_image: false
+

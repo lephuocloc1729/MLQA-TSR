@@ -464,6 +464,40 @@ Do not report or submit outputs produced from missing-ID dry runs. The real
 submission zip must contain exactly `submission_task1.json` and
 `submission_task2.json` at the top level.
 
+### VLSP Public/Private Test Runner
+
+Week 5 test artifacts are generated with `src.pipeline --mode vlsp-test`.
+These inputs do not have answer labels, and the runner strips helper
+`answer`/`relevant_articles` fields before inference so retrieval and QA are
+predicted, not copied from templates.
+
+Task 1 retrieval-only:
+
+```bash
+python -m src.pipeline \
+  --mode vlsp-test \
+  --set-name public_test \
+  --task task1 \
+  --config configs/experiments/vlsp_task1_retrieval.yaml \
+  --limit 5 \
+  --output data/outputs/competitions/public_task1_smoke.jsonl
+```
+
+Task 2 structured real backend:
+
+```bash
+python -m src.pipeline \
+  --mode vlsp-test \
+  --set-name private_test \
+  --task task2 \
+  --config configs/experiments/vlsp_task2_structured_real.yaml \
+  --output data/outputs/competitions/private_task2_predictions.jsonl
+```
+
+Real Task 2 rows must be `mock=false` and include `model.include_image=true`.
+If the configured backend is missing credentials, the runner fails before a
+full expensive run instead of writing default answers.
+
 ## Final Defense Reproducibility Pack
 
 Use this checklist before copying any number into the final report or slides.
