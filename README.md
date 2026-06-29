@@ -314,6 +314,24 @@ make verify
 git diff --check
 ```
 
+For final release cleanup and defense rehearsal, use:
+
+```bash
+make release-check
+make qdrant-up
+make preprocess
+python -m src.data_utils --mode split
+make index
+make index-examples
+bash scripts/demo.sh
+```
+
+The release notes and tag checklist are in
+[`docs/release-v0.1.0-course.md`](docs/release-v0.1.0-course.md). Create the
+`v0.1.0-course` tag only after the release PR is reviewed, local verification
+passes, and `git status --ignored --short` confirms raw data, generated
+outputs, Qdrant storage, embeddings, and checkpoints are not staged.
+
 If plain `pytest` crashes on macOS because of a local `readline` issue, use
 `make test` or `make ci-test`. Both commands inject a lightweight `readline`
 shim before importing pytest.

@@ -1,4 +1,4 @@
-.PHONY: help setup check-data qdrant-up qdrant-down preprocess index index-examples index-week2 retrieve benchmark-b2 benchmark-b3 benchmark-b4 benchmark-week2-smoke benchmark-w3-real adapter-diagnostic qlora-dry-run qlora-smoke20 task1 task2 assistant eval demo ci-test test verify clean
+.PHONY: help setup check-data check-data-all qdrant-up qdrant-down preprocess index index-examples index-week2 retrieve benchmark-b2 benchmark-b3 benchmark-b4 benchmark-week2-smoke benchmark-w3-real adapter-diagnostic qlora-dry-run qlora-smoke20 task1 task2 assistant eval demo ci-test test verify release-check clean
 
 SMOKE_LIMIT ?= 5
 
@@ -8,6 +8,7 @@ help:
 	@echo "Setup:"
 	@echo "  make setup       Install pinned Python dependencies"
 	@echo "  make check-data  Check expected raw VLSP data paths"
+	@echo "  make check-data-all  Check train, public, and private data paths"
 	@echo "  make ci-test     Run lightweight schema tests used by CI"
 	@echo "  make test        Run local unit tests with the macOS readline workaround"
 	@echo ""
@@ -28,6 +29,7 @@ help:
 	@echo "  make qlora-dry-run    Validate QLoRA config without loading model weights"
 	@echo "  make qlora-smoke20    GPU-only 20-sample QLoRA smoke command"
 	@echo "  make demo             Start the Streamlit demo"
+	@echo "  make release-check    Run final release preflight checks"
 
 setup:
 	python -m pip install --upgrade pip
@@ -35,6 +37,9 @@ setup:
 
 check-data:
 	bash scripts/check_data.sh
+
+check-data-all:
+	bash scripts/check_data.sh --all
 
 qdrant-up:
 	docker compose up -d
@@ -93,7 +98,7 @@ qlora-smoke20:
 	python -m src.train_qlora --config configs/qlora.yaml --max-samples 20
 
 demo:
-	python -m streamlit run app/streamlit_app.py
+	bash scripts/demo.sh
 
 ci-test:
 	python -c 'import sys, types; sys.modules.setdefault("readline", types.ModuleType("readline")); import pytest; raise SystemExit(pytest.main(["-q", "tests/test_schemas.py"], plugins=[]))'
@@ -104,6 +109,12 @@ test:
 verify: ci-test
 	python -m pip check
 	git diff --check
+
+release-check: verify
+	python -m src.evaluate --help >/dev/null
+	python -m src.submission --help >/dev/null
+	bash scripts/check_data.sh --all
+	git status --ignored --short
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +
