@@ -1,0 +1,53 @@
+extends: ../config.yaml
+
+experiment:
+  name: lowcost_task2_qwen_answer_only
+  label: LowCost_Task2_Qwen_AnswerOnly_FewShot
+  description: Qwen2.5-VL Task 2 benchmark with answer-only multimodal few-shot prompt.
+  split: val
+  mock: false
+  retrieval_strategy: fusion
+  prompt_variant: lowcost_answer_only_fewshot
+  use_examples: true
+  example_top_k: 3
+  example_retrieval_mode: fusion
+  output_path: data/outputs/experiments/lowcost_task2_qwen_answer_only.jsonl
+  metrics_path: data/outputs/experiments/lowcost_task2_qwen_answer_only_metrics.json
+
+model:
+  backend: openai_compatible
+  name: Qwen/Qwen2.5-VL-7B-Instruct
+  name_env: OPENAI_COMPATIBLE_MODEL
+  api_key_env: OPENAI_COMPATIBLE_API_KEY
+  base_url_env: OPENAI_COMPATIBLE_BASE_URL
+  gpu_host_env: QWEN_VL_GPU_HOST
+  serving: openai-compatible
+  generation_config: vllm
+  dtype: float16
+  quantization: none
+  temperature: 0.0
+  max_new_tokens: 32
+  include_image: true
+  request_timeout_seconds: 180
+  max_retries: 2
+  retry_sleep_seconds: 0.5
+
+prompt:
+  variant: lowcost_answer_only_fewshot
+  top_examples: 3
+  max_example_chars: 900
+
+retrieval:
+  top_k: 3
+  example_top_k: 3
+  example_candidate_multiplier: 5
+  text_weight: 0.7
+  image_weight: 0.3
+  fusion_direct_weight: 1.0
+  fusion_example_vote_weight: 1.0
+  fusion_allow_example_failure: false
+
+w6_lowcost:
+  answer_only_prompt: true
+  staged_limits: [1, 10, full]
+  submission_candidate_after_validation: true

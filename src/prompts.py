@@ -19,6 +19,7 @@ class PromptVariant(str, Enum):
     TEXT_RAG = "text_rag"
     FEW_SHOT_RAG = "few_shot_rag"
     STRUCTURED_LEGAL_RAG = "structured_legal_rag"
+    LOWCOST_ANSWER_ONLY_FEWSHOT = "lowcost_answer_only_fewshot"
 
 
 @dataclass(frozen=True)
@@ -112,6 +113,166 @@ def format_example_choices(example: Mapping[str, Any]) -> str:
     if example.get("question_type") == QuestionType.YES_NO.value:
         return "Đúng\nSai"
     return "(no fixed choices)"
+
+
+def lowcost_answer_only_system_prompt() -> str:
+    return "\n".join(
+        [
+            "Given an image and a question both about traffic in Vietnam,",
+            "Multiple-choice and yes/no questions may be provided.",
+            "If A, B, C, D are given, choose the letter only.",
+            "If Đúng/Sai are given, choose Đúng or Sai only.",
+            "No explanation is needed.",
+        ]
+    )
+
+
+def format_lowcost_answer_text(
+    item: Query | Mapping[str, Any],
+    include_answer: bool,
+) -> str:
+    query = item if isinstance(item, Query) else None
+    question = query.question if query is not None else str(item.get("question") or "")
+    question_type = (
+        query.question_type.value
+        if query is not None and query.question_type
+        else str(item.get("question_type") or "")
+    )
+    choices = query.choices if query is not None else dict(item.get("choices") or {})
+    answer = query.answer if query is not None else item.get("answer")
+
+    lines = ["Question: " + question, "Options:"]
+    if question_type == QuestionType.MULTIPLE_CHOICE.value:
+        lines.extend(f"{key}: {choices[key]}" for key in sorted(choices))
+    elif question_type == QuestionType.YES_NO.value:
+        lines.extend(["Đúng", "Sai"])
+    else:
+        lines.append("(free-form answer)")
+
+    choice_line = "Choice:"
+    if include_answer and answer not in (None, ""):
+        choice_line += " " + str(answer)
+    lines.append(choice_line)
+    return "\n".join(lines)
+
+
+def _item_id(item: Mapping[str, Any]) -> str | None:
+    value = item.get("sample_id") or item.get("id")
+    return None if value in (None, "") else str(value)
+
+
+def _item_image_id(item: Mapping[str, Any]) -> str | None:
+    value = item.get("image_id")
+    return None if value in (None, "") else str(value)
+
+
+def _item_question_type(item: Mapping[str, Any]) -> str | None:
+    value = item.get("question_type")
+    return None if value in (None, "") else str(value)
+
+
+def select_lowcost_few_shot_examples(
+    examples: Iterable[Mapping[str, Any]],
+    query: Query,
+    top_examples: int,
+) -> list[Mapping[str, Any]]:
+    selected: list[Mapping[str, Any]] = []
+    query_type = resolve_question_type(query).value
+
+    for raw_example in examples:
+        example = _example_payload(raw_example)
+        split = example.get("split")
+        if split != "train":
+            raise ValueError("low-cost few-shot examples must include split='train'")
+        if query.id and _item_id(example) == query.id:
+            continue
+        if query.image_id and _item_image_id(example) == query.image_id:
+            continue
+        if _item_question_type(example) != query_type:
+            continue
+        if "answer" not in example or example.get("answer") in (None, ""):
+            raise ValueError("low-cost few-shot examples must include train gold answers")
+        if not (example.get("image_path") or example.get("image_id")):
+            raise ValueError("low-cost few-shot examples must include an image reference")
+
+        selected.append(example)
+        if len(selected) >= top_examples:
+            break
+
+    return selected
+
+
+def _image_reference_from_item(item: Query | Mapping[str, Any]) -> str:
+    if isinstance(item, Query):
+        reference = item.image_path or item.image_id
+    else:
+        reference = item.get("image_path") or item.get("image_id")
+    if not reference:
+        raise ValueError("low-cost answer-only prompt requires an image reference")
+    return str(reference)
+
+
+def _image_url_part(
+    image_reference: str,
+    image_url_builder: Any | None = None,
+) -> dict[str, Any]:
+    url = image_url_builder(image_reference) if image_url_builder else image_reference
+    return {"type": "image_url", "image_url": {"url": url}}
+
+
+def build_lowcost_answer_only_messages(
+    query: Query | dict,
+    examples: Iterable[Mapping[str, Any]] | None = None,
+    prompt_config: PromptConfig | None = None,
+    image_url_builder: Any | None = None,
+) -> list[dict[str, Any]]:
+    query_model = query if isinstance(query, Query) else Query.model_validate(query)
+    config = prompt_config or PromptConfig()
+    selected_examples = select_lowcost_few_shot_examples(
+        examples or [],
+        query_model,
+        top_examples=config.top_examples,
+    )
+
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": lowcost_answer_only_system_prompt()}
+    ]
+
+    for index, example in enumerate(selected_examples, start=1):
+        image_reference = _image_reference_from_item(example)
+        messages.append(
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            f"Few-shot example {index}:\n"
+                            + format_lowcost_answer_text(example, include_answer=True)
+                        ),
+                    },
+                    _image_url_part(image_reference, image_url_builder),
+                ],
+            }
+        )
+
+    query_image_reference = _image_reference_from_item(query_model)
+    messages.append(
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        "Query:\n"
+                        + format_lowcost_answer_text(query_model, include_answer=False)
+                    ),
+                },
+                _image_url_part(query_image_reference, image_url_builder),
+            ],
+        }
+    )
+    return messages
 
 
 def format_few_shot_examples(
@@ -262,13 +423,23 @@ def build_vlm_messages(
     examples: Iterable[Mapping[str, Any]] | None = None,
     variant: PromptVariant | str = PromptVariant.TEXT_RAG,
     prompt_config: PromptConfig | None = None,
+    image_url_builder: Any | None = None,
 ) -> list[dict]:
     """Return a mockable chat-message shape without loading any model weights."""
+    prompt_variant = normalize_prompt_variant(variant)
+    if prompt_variant == PromptVariant.LOWCOST_ANSWER_ONLY_FEWSHOT:
+        return build_lowcost_answer_only_messages(
+            query,
+            examples=examples,
+            prompt_config=prompt_config,
+            image_url_builder=image_url_builder,
+        )
+
     prompt = build_legal_qa_prompt(
         query,
         evidence,
         examples=examples,
-        variant=variant,
+        variant=prompt_variant,
         prompt_config=prompt_config,
     )
     return [{"role": "user", "content": [{"type": "text", "text": prompt}]}]
