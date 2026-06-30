@@ -547,6 +547,70 @@ Every reported real row must point to a `mock=false` metrics artifact under
 parse success, invalid JSON, truncation, and error IDs. Do not submit
 public/private predictions until the locked-validation smoke is stable.
 
+## Week 6 Low-Cost Task 1 Lift
+
+Task 1 can improve without calling the VLM by retrieving similar solved train
+examples from the low-cost named-vector Qdrant collection and copying the union
+of their `relevant_articles`. This is separate from direct LawDB text retrieval:
+the evidence comes from train-example citations, not from article search.
+
+Recommended configs:
+
+| Config | Query mode | Limits | Output purpose |
+| --- | --- | --- | --- |
+| `configs/experiments/lowcost_task1_text_image_object.yaml` | text prefetch + image prefetch + object multivector final query | `text_limit=10`, `image_limit=5`, `object_limit=3` | main Task 1 candidate |
+| `configs/experiments/lowcost_task1_text_image.yaml` | text prefetch + whole-image final query | `text_limit=10`, `image_limit=5` | fallback/ablation when object features are noisy |
+
+Build features and the train-example index first:
+
+```bash
+bash scripts/lowcost_features.sh --set-name train
+bash scripts/lowcost_index.sh \
+  --config configs/experiments/lowcost_retrieval.yaml \
+  --mode index \
+  --features data/outputs/lowcost_features/train_features.jsonl
+```
+
+Smoke Task 1 on public test:
+
+```bash
+bash scripts/evaluate.sh lowcost-task1 \
+  --config configs/experiments/lowcost_task1_text_image_object.yaml \
+  --set-name public_test \
+  --limit 5 \
+  --features data/outputs/lowcost_features/public_test_features.jsonl \
+  --output data/outputs/competitions/public_task1_lowcost_smoke.jsonl
+```
+
+Choose top-k settings on validation before private submission. Generate one or
+more validation prediction files, then compare macro Precision/Recall/F2:
+
+```bash
+bash scripts/evaluate.sh lowcost-task1-ablate \
+  --gold data/processed/val_split.jsonl \
+  --prediction-glob 'data/outputs/competitions/val_task1_lowcost_*.jsonl'
+```
+
+Package a Task 1 candidate with the current best Task 2 artifact through the
+competition packager. Keep Task 2 fixed while testing Task 1 variants so the
+post-submission score change is interpretable.
+
+```bash
+python -m src.competition_submission \
+  --set-name private_test \
+  --task both \
+  --task1-predictions data/outputs/competitions/private_task1_lowcost_t10_i5_o3.jsonl \
+  --task2-predictions data/outputs/competitions/private_task2_best.jsonl \
+  --output-dir data/outputs/submissions/vlsp_private_lowcost_task1
+
+python -m src.competition_submission \
+  --pack data/outputs/submissions/vlsp_private_lowcost_task1 \
+  --output data/outputs/submissions/submission_lowcost_task1_t10_i5_o3.zip
+```
+
+Do not report private-score improvements unless the submitted zip contains only
+the intended Task 1 change and the Task 2 artifact is unchanged.
+
 ## Final Defense Reproducibility Pack
 
 Use this checklist before copying any number into the final report or slides.
