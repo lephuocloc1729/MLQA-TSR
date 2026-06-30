@@ -32,6 +32,8 @@ REQUIRED_OUTPUT_FIELDS = {
     "abstained",
 }
 JSON_FENCE_PATTERN = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE)
+ANSWER_TAG_PATTERN = re.compile(r"<answer>\s*(.*?)\s*</answer>", re.DOTALL | re.IGNORECASE)
+ANSWER_ONLY_JSON_KEYS = ("choice", "answer")
 
 
 class VLMClient(Protocol):
@@ -301,6 +303,88 @@ def validate_raw_answer(answer: Any, question_type: QuestionType) -> str:
     return normalized
 
 
+def normalize_answer_only_label(label: Any, question_type: QuestionType) -> str:
+    if not isinstance(label, str):
+        raise ValueError("answer-only response label must be a string")
+
+    normalized = normalize_text(label)
+    yes_no_mapping = {
+        "yes": "Đúng",
+        "true": "Đúng",
+        "no": "Sai",
+        "false": "Sai",
+    }
+    if question_type == QuestionType.YES_NO:
+        normalized = yes_no_mapping.get(normalized.casefold(), normalized)
+
+    return validate_raw_answer(normalized, question_type)
+
+
+def extract_answer_only_label(raw_response: str) -> str:
+    text = normalize_text(raw_response)
+    if not text:
+        raise ValueError("answer-only response is empty")
+
+    tag_match = ANSWER_TAG_PATTERN.search(text)
+    if tag_match:
+        return normalize_text(tag_match.group(1))
+
+    fence_match = JSON_FENCE_PATTERN.search(text)
+    candidate = fence_match.group(1).strip() if fence_match else text
+    if candidate.startswith("{"):
+        try:
+            payload = json.loads(candidate)
+        except json.JSONDecodeError:
+            payload = extract_json_object(text)
+        if not isinstance(payload, Mapping):
+            raise ValueError("answer-only JSON response must be an object")
+        for key in ANSWER_ONLY_JSON_KEYS:
+            if key in payload:
+                return normalize_text(payload[key])
+        raise ValueError("answer-only JSON must include choice or answer")
+
+    return text
+
+
+def answer_only_citations(evidence: list[Evidence]) -> tuple[list[dict[str, str]], bool]:
+    if not evidence:
+        return [], True
+    first = evidence[0].to_citation()
+    return [{"law_id": first.law_id, "article_id": first.article_id}], False
+
+
+def parse_answer_only_prediction(
+    raw_response: str,
+    query: Query | dict,
+    evidence: list[Evidence | dict],
+) -> Prediction:
+    query_model = query if isinstance(query, Query) else Query.model_validate(query)
+    evidence_models = [
+        item if isinstance(item, Evidence) else Evidence.model_validate(item)
+        for item in evidence
+    ]
+    question_type = resolve_question_type(query_model)
+    label = normalize_answer_only_label(
+        extract_answer_only_label(raw_response),
+        question_type,
+    )
+    citations, abstained = answer_only_citations(evidence_models)
+    prediction = Prediction.model_validate(
+        {
+            "id": query_model.id,
+            "question_type": question_type,
+            "answer": label,
+            "citations": citations,
+            "explanation": "Answer-only benchmark prompt; no explanation requested.",
+            "confidence": None,
+            "abstained": abstained,
+            "raw_response": raw_response,
+        }
+    )
+    PipelineResult(query=query_model, evidence=evidence_models, prediction=prediction)
+    return prediction
+
+
 def parse_prediction(
     raw_response: str,
     query: Query | dict,
@@ -395,8 +479,19 @@ class LegalQAVLM:
             examples=examples,
             variant=variant or self.prompt_variant,
             prompt_config=self.prompt_config,
+            image_url_builder=image_path_to_data_url
+            if self.include_image
+            and normalize_prompt_variant(variant or self.prompt_variant)
+            == PromptVariant.LOWCOST_ANSWER_ONLY_FEWSHOT
+            else None,
         )
-        image_part = query_image_message_part(query_model) if self.include_image else None
+        effective_variant = normalize_prompt_variant(variant or self.prompt_variant)
+        image_part = (
+            query_image_message_part(query_model)
+            if self.include_image
+            and effective_variant != PromptVariant.LOWCOST_ANSWER_ONLY_FEWSHOT
+            else None
+        )
         if image_part is not None:
             content = messages[0].setdefault("content", [])
             if not isinstance(content, list):
@@ -429,6 +524,13 @@ class LegalQAVLM:
             temperature=self.temperature,
             max_new_tokens=self.max_new_tokens,
         )
+        effective_variant = normalize_prompt_variant(variant or self.prompt_variant)
+        if effective_variant == PromptVariant.LOWCOST_ANSWER_ONLY_FEWSHOT:
+            return parse_answer_only_prediction(
+                raw_response,
+                query=query,
+                evidence=evidence,
+            )
         return parse_prediction(raw_response, query=query, evidence=evidence)
 
 
@@ -467,12 +569,29 @@ def build_prompt_for_sample(
         PromptVariant.STRUCTURED_LEGAL_RAG,
     }:
         evidence = retrieve_evidence(query, dict(config), top_k=top_k)
-    elif prompt_variant == PromptVariant.FEW_SHOT_RAG:
+    elif prompt_variant in {
+        PromptVariant.FEW_SHOT_RAG,
+        PromptVariant.LOWCOST_ANSWER_ONLY_FEWSHOT,
+    }:
         if not example_collection_exists(dict(config)):
-            raise RuntimeError(
-                "Example collection is unavailable. Run "
-                "`python -m src.retrieval --mode index-examples --split train` "
-                "before building a few_shot_rag prompt."
+            if prompt_variant == PromptVariant.FEW_SHOT_RAG:
+                raise RuntimeError(
+                    "Example collection is unavailable. Run "
+                    "`python -m src.retrieval --mode index-examples --split train` "
+                    "before building a few_shot_rag prompt."
+                )
+            examples = []
+            evidence = []
+            return json.dumps(
+                build_vlm_messages(
+                    query,
+                    evidence,
+                    examples=examples,
+                    variant=prompt_variant,
+                    prompt_config=runtime.prompt_config,
+                ),
+                ensure_ascii=False,
+                indent=2,
             )
         resolved_example_top_k = example_top_k or _top_examples_from_config(config)
         fused_result = retrieve_fused_evidence(
@@ -493,6 +612,19 @@ def build_prompt_for_sample(
     elif prompt_variant == PromptVariant.ZERO_SHOT:
         evidence = []
         examples = []
+
+    if prompt_variant == PromptVariant.LOWCOST_ANSWER_ONLY_FEWSHOT:
+        return json.dumps(
+            build_vlm_messages(
+                query,
+                evidence,
+                examples=examples,
+                variant=prompt_variant,
+                prompt_config=runtime.prompt_config,
+            ),
+            ensure_ascii=False,
+            indent=2,
+        )
 
     return build_legal_qa_prompt(
         query,

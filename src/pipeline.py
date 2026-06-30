@@ -217,7 +217,10 @@ def use_examples_for_prompt(config: Mapping[str, Any]) -> bool:
     experiment = experiment_config(config)
     if "use_examples" in experiment:
         return bool(experiment["use_examples"])
-    return prompt_variant(config) == PromptVariant.FEW_SHOT_RAG
+    return prompt_variant(config) in {
+        PromptVariant.FEW_SHOT_RAG,
+        PromptVariant.LOWCOST_ANSWER_ONLY_FEWSHOT,
+    }
 
 
 def is_mock_run(config: Mapping[str, Any]) -> bool:
@@ -985,6 +988,8 @@ def retrieve_prompt_examples(
     retrieval_config = config.get("retrieval", {})
     top_k = int(config.get("prompt", {}).get("top_examples", 3))
     top_k = int(experiment_config(config).get("example_top_k", top_k))
+    if prompt_variant(config) == PromptVariant.LOWCOST_ANSWER_ONLY_FEWSHOT:
+        top_k *= max(1, int(retrieval_config.get("example_candidate_multiplier", 5)))
     mode = str(experiment_config(config).get("example_retrieval_mode", "fusion"))
     examples = retrieve_examples(
         sample,
@@ -1011,9 +1016,16 @@ def build_prompt_metadata(
         examples=examples,
         variant=variant,
     )
+    if variant == PromptVariant.LOWCOST_ANSWER_ONLY_FEWSHOT:
+        example_count = max(
+            0,
+            sum(1 for message in messages if message.get("role") == "user") - 1,
+        )
+    else:
+        example_count = len(examples)
     return {
         "variant": variant.value,
-        "example_count": len(examples),
+        "example_count": example_count,
         "message_hash": stable_json_hash(messages),
     }
 
