@@ -569,6 +569,12 @@ def build_prompt_for_sample(
         PromptVariant.STRUCTURED_LEGAL_RAG,
     }:
         evidence = retrieve_evidence(query, dict(config), top_k=top_k)
+    elif (
+        prompt_variant == PromptVariant.LOWCOST_ANSWER_ONLY_FEWSHOT
+        and config.get("experiment", {}).get("use_examples") is False
+    ):
+        evidence = []
+        examples = []
     elif prompt_variant in {
         PromptVariant.FEW_SHOT_RAG,
         PromptVariant.LOWCOST_ANSWER_ONLY_FEWSHOT,

@@ -264,6 +264,35 @@ def is_valid_prediction_answer(answer: str, question_type: str) -> bool:
     return True
 
 
+def prediction_error_text(record: Mapping[str, Any]) -> str:
+    prediction = as_mapping(record.get("prediction"))
+    error = as_mapping(prediction.get("error"))
+    parse = as_mapping(record.get("parse"))
+    parts = [
+        prediction.get("explanation"),
+        error.get("type"),
+        error.get("message"),
+        parse.get("status"),
+        parse.get("error_type"),
+    ]
+    return " ".join(normalize_text(part) for part in parts if part not in (None, ""))
+
+
+def looks_like_invalid_label_text(text: Any) -> bool:
+    normalized = normalize_text(text).casefold()
+    return any(
+        marker in normalized
+        for marker in (
+            "prediction must be a, b, c or d",
+            "yes/no prediction must be đúng or sai",
+            "answer-only response label",
+            "invalid multiple choice prediction answer",
+            "invalid multiple-choice prediction answer",
+            "invalid yes/no prediction answer",
+        )
+    )
+
+
 def evaluate_retrieval(records: list[Mapping[str, Any]]) -> dict[str, Any]:
     sample_scores = [
         score_retrieval_sample(
@@ -294,6 +323,8 @@ def evaluate_qa(
         lambda: {"correct": 0, "total": 0}
     )
     prediction_distribution: Counter[str] = Counter()
+    missing_prediction_count = 0
+    invalid_label_count = 0
 
     for index, record in enumerate(records):
         sample_id = extract_sample_id(record, index)
@@ -311,6 +342,18 @@ def evaluate_qa(
         gold_answer_stats[gold_answer]["total"] += 1
 
         if raw_prediction_answer is None:
+            if looks_like_invalid_label_text(prediction_error_text(record)):
+                invalid_label_count += 1
+                invalid_predictions.append(
+                    {
+                        "id": sample_id,
+                        "reason": "invalid prediction label rejected by parser",
+                    }
+                )
+                prediction_distribution["__INVALID__"] += 1
+                continue
+
+            missing_prediction_count += 1
             invalid_predictions.append(
                 {"id": sample_id, "reason": "missing prediction answer"}
             )
@@ -318,6 +361,7 @@ def evaluate_qa(
             continue
 
         if not is_valid_prediction_answer(predicted_answer, question_type):
+            invalid_label_count += 1
             invalid_predictions.append(
                 {
                     "id": sample_id,
@@ -342,6 +386,8 @@ def evaluate_qa(
         "correct": correct,
         "total": total,
         "skipped_no_gold": skipped_no_gold,
+        "missing_prediction_count": missing_prediction_count,
+        "invalid_label_count": invalid_label_count,
         "by_question_type": {
             question_type: {
                 "accuracy": stats["correct"] / stats["total"] if stats["total"] else 0.0,

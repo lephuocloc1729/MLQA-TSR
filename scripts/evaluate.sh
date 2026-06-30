@@ -53,6 +53,24 @@ elif [ "$1" = "run-w5-qwen" ]; then
   else
     "$0" run-experiment "$config" "$limit"
   fi
+elif [ "$1" = "run-w6-lowcost-task2" ]; then
+  shift
+  limit="${1:-5}"
+  config="${2:-configs/experiments/lowcost_task2_qwen_answer_only.yaml}"
+  if [ "$limit" = "full" ]; then
+    "$0" run-experiment "$config"
+  else
+    "$0" run-experiment "$config" "$limit"
+  fi
+elif [ "$1" = "run-w6-lowcost-task2-matrix" ]; then
+  shift
+  limit="${1:-5}"
+  for config in \
+    configs/experiments/lowcost_task2_qwen_answer_only_no_examples.yaml \
+    configs/experiments/lowcost_task2_qwen_answer_only.yaml
+  do
+    "$0" run-w6-lowcost-task2 "$limit" "$config"
+  done
 elif [ "$1" = "adapter-diagnostic" ]; then
   shift
   limit="${1:-5}"
