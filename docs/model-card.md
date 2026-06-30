@@ -29,6 +29,22 @@ The recommended course-product variant is:
 
 Real metrics are reportable only after a `mock=false` metrics artifact exists.
 
+## Week 5 Real Backend Candidate
+
+For post-submission benchmarking, the preferred backend candidate is:
+
+- config: `configs/experiments/vlsp_task2_qwen25vl_7b.yaml`;
+- model: `Qwen/Qwen2.5-VL-7B-Instruct`;
+- serving: OpenAI-compatible chat completions endpoint;
+- image input: enabled through `model.include_image=true`;
+- prompt: `structured_legal_rag`;
+- output: the same validated JSON `Prediction` contract.
+
+Fallback config `configs/experiments/vlsp_task2_qwen25vl_3b.yaml` is available
+only if 7B is unstable on the GPU host. Any fallback must include the exact
+error reason, such as CUDA OOM, timeout, server crash, invalid image handling,
+or unacceptable parse failure rate.
+
 ## Inputs
 
 - Traffic image path or uploaded image.
@@ -66,6 +82,8 @@ citations, truncated output, and invalid labels are counted separately.
 - The model may output malformed JSON or citations outside the evidence set.
 - Real-backend metrics are unavailable until a hosted/local VLM endpoint is
   configured and run.
+- W5 Qwen2.5-VL metrics remain pending until a `mock=false` artifact exists for
+  the 7B config or a documented 3B fallback run.
 - The QLoRA adapter is diagnostic and not submission-ready.
 
 ## Safety And Ethics

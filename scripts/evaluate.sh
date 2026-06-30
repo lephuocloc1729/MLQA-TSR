@@ -44,6 +44,15 @@ elif [ "$1" = "run-w3-real" ]; then
   do
     "$0" run-experiment "$config" "$limit"
   done
+elif [ "$1" = "run-w5-qwen" ]; then
+  shift
+  limit="${1:-1}"
+  config="${2:-configs/experiments/vlsp_task2_qwen25vl_7b.yaml}"
+  if [ "$limit" = "full" ]; then
+    "$0" run-experiment "$config"
+  else
+    "$0" run-experiment "$config" "$limit"
+  fi
 elif [ "$1" = "adapter-diagnostic" ]; then
   shift
   limit="${1:-5}"

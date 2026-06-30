@@ -6,6 +6,7 @@ import json
 import mimetypes
 import os
 import re
+import time
 import unicodedata
 import urllib.error
 import urllib.request
@@ -52,6 +53,8 @@ class OpenAICompatibleClient:
         base_url: str,
         api_key: str,
         timeout_seconds: float = 120.0,
+        max_retries: int = 0,
+        retry_sleep_seconds: float = 0.5,
     ) -> None:
         if not base_url:
             raise ValueError("OpenAI-compatible backend requires a non-empty base_url")
@@ -60,8 +63,35 @@ class OpenAICompatibleClient:
         self.endpoint = chat_completions_endpoint(base_url)
         self.api_key = api_key
         self.timeout_seconds = timeout_seconds
+        self.max_retries = max(0, int(max_retries))
+        self.retry_sleep_seconds = max(0.0, float(retry_sleep_seconds))
 
     def generate(
+        self,
+        messages: list[dict],
+        model_name: str,
+        temperature: float,
+        max_new_tokens: int,
+    ) -> str:
+        last_error: RuntimeError | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                return self._generate_once(
+                    messages=messages,
+                    model_name=model_name,
+                    temperature=temperature,
+                    max_new_tokens=max_new_tokens,
+                )
+            except RuntimeError as exc:
+                last_error = exc
+                if attempt >= self.max_retries or not is_retryable_backend_error(exc):
+                    raise
+                if self.retry_sleep_seconds:
+                    time.sleep(self.retry_sleep_seconds)
+        assert last_error is not None
+        raise last_error
+
+    def _generate_once(
         self,
         messages: list[dict],
         model_name: str,
@@ -110,6 +140,23 @@ def chat_completions_endpoint(base_url: str) -> str:
     if normalized.endswith("/chat/completions"):
         return normalized
     return normalized + "/chat/completions"
+
+
+def is_retryable_backend_error(error: RuntimeError) -> bool:
+    message = str(error).casefold()
+    retryable_markers = (
+        "empty response",
+        "http 408",
+        "http 429",
+        "http 500",
+        "http 502",
+        "http 503",
+        "http 504",
+        "request failed",
+        "timed out",
+        "timeout",
+    )
+    return any(marker in message for marker in retryable_markers)
 
 
 def load_dotenv_if_available() -> None:
@@ -163,6 +210,8 @@ def create_vlm_client(
             base_url=str(base_url),
             api_key=str(api_key),
             timeout_seconds=float(model_config.get("request_timeout_seconds", 120)),
+            max_retries=int(model_config.get("max_retries", 0)),
+            retry_sleep_seconds=float(model_config.get("retry_sleep_seconds", 0.5)),
         )
 
     raise ValueError(f"Unsupported VLM backend: {backend}")
