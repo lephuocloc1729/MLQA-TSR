@@ -90,6 +90,79 @@ elif [ "$1" = "submission" ]; then
 elif [ "$1" = "competition-submission" ]; then
   shift
   "$PYTHON_BIN" -m src.competition_submission "$@"
+elif [ "$1" = "hybrid-submission" ]; then
+  shift
+  if [ "$#" -lt 3 ]; then
+    echo "Usage: scripts/evaluate.sh hybrid-submission <candidate-name> <task1-jsonl> <task2-jsonl> [set-name]" >&2
+    exit 2
+  fi
+  candidate="$1"
+  task1_predictions="$2"
+  task2_predictions="$3"
+  set_name="${4:-private_test}"
+  case "$candidate" in
+    *[!A-Za-z0-9_.-]*|"")
+      echo "candidate-name must contain only letters, numbers, dot, underscore, or dash" >&2
+      exit 2
+      ;;
+  esac
+
+  output_root="data/outputs/submissions"
+  output_dir="$output_root/$candidate"
+  named_zip="$output_root/submission_${candidate}.zip"
+  final_zip="$output_root/submission.zip"
+  if [ -e "$output_dir" ]; then
+    echo "Refusing to overwrite existing candidate directory: $output_dir" >&2
+    exit 2
+  fi
+  if [ -e "$named_zip" ]; then
+    echo "Refusing to overwrite existing named zip: $named_zip" >&2
+    exit 2
+  fi
+
+  "$PYTHON_BIN" -m src.competition_submission \
+    --set-name "$set_name" \
+    --task both \
+    --task1-predictions "$task1_predictions" \
+    --task2-predictions "$task2_predictions" \
+    --output-dir "$output_dir"
+
+  "$PYTHON_BIN" -m src.competition_submission \
+    --pack "$output_dir" \
+    --output "$named_zip"
+
+  if [ -e "$final_zip" ]; then
+    timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    cp "$final_zip" "$output_root/submission_backup_${timestamp}.zip"
+  fi
+  cp "$named_zip" "$final_zip"
+
+  "$PYTHON_BIN" - "$candidate" "$task1_predictions" "$task2_predictions" "$named_zip" "$final_zip" <<'PY'
+import hashlib
+import sys
+import zipfile
+from pathlib import Path
+
+candidate, task1, task2, named_zip, final_zip = sys.argv[1:]
+zip_path = Path(named_zip)
+digest = hashlib.sha256(zip_path.read_bytes()).hexdigest()
+with zipfile.ZipFile(zip_path) as archive:
+    entries = archive.namelist()
+if entries != ["submission_task1.json", "submission_task2.json"]:
+    raise SystemExit(f"ERROR: unexpected zip entries: {entries}")
+print(f"candidate={candidate}")
+print(f"named_zip={named_zip}")
+print(f"submission_zip={final_zip}")
+print(f"sha256={digest}")
+print("entries=" + ",".join(entries))
+print()
+print("| candidate | task1 artifact | task2 artifact | sha256 | F2 | Accuracy | notes |")
+print("|---|---|---|---|---:|---:|---|")
+print(
+    f"| {candidate} | {task1} | {task2} | {digest} | TBD | TBD | "
+    "record Codabench result after upload |"
+)
+PY
 elif [ "$1" = "lowcost-task1" ]; then
   shift
   "$PYTHON_BIN" -m src.lowcost_retrieval --mode task1 "$@"
