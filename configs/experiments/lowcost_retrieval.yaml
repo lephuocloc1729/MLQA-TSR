@@ -1,0 +1,26 @@
+extends: ../config.yaml
+
+experiment:
+  name: lowcost_retrieval_features
+  label: LowCost_Feature_Cache
+  description: Cache low-cost text, whole-image, and object-crop features before retrieval indexing.
+  mock: false
+
+lowcost_features:
+  text_model: jinaai/jina-embeddings-v3
+  image_model: nvidia/C-RADIOv2-B
+  object_model: google/owlv2-large-patch14-ensemble
+  object_threshold: 0.3
+  image_max_size: 1536
+  device:
+  object_labels:
+    - traffic sign
+    - rectangle sign
+    - triangle sign
+    - square sign
+    - circle sign
+    - octagon sign
+    - stop sign
+
+output:
+  lowcost_feature_dir: data/outputs/lowcost_features
