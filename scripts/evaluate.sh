@@ -72,6 +72,12 @@ elif [ "$1" = "submission" ]; then
 elif [ "$1" = "competition-submission" ]; then
   shift
   "$PYTHON_BIN" -m src.competition_submission "$@"
+elif [ "$1" = "lowcost-task1" ]; then
+  shift
+  "$PYTHON_BIN" -m src.lowcost_retrieval --mode task1 "$@"
+elif [ "$1" = "lowcost-task1-ablate" ]; then
+  shift
+  "$PYTHON_BIN" -m src.lowcost_retrieval --mode ablate "$@"
 else
   "$PYTHON_BIN" -m src.evaluate "$@"
 fi

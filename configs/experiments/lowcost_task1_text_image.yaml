@@ -1,0 +1,17 @@
+extends: lowcost_retrieval.yaml
+
+experiment:
+  name: lowcost_task1_text_image
+  label: LowCost_Task1_TextImage
+  description: VLSP Task 1 retrieval by copying citations from similar train examples using text prefetch and whole-image reranking.
+  mock: false
+
+lowcost_task1:
+  query_mode: text_image
+  text_limit: 10
+  image_limit: 5
+  object_limit: 3
+  max_articles:
+
+output:
+  task1_prediction_path: data/outputs/competitions/private_task1_lowcost_t10_i5.jsonl
