@@ -176,6 +176,9 @@ def select_lowcost_few_shot_examples(
     query: Query,
     top_examples: int,
 ) -> list[Mapping[str, Any]]:
+    if top_examples <= 0:
+        return []
+
     selected: list[Mapping[str, Any]] = []
     query_type = resolve_question_type(query).value
 

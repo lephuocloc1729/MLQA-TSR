@@ -611,6 +611,76 @@ python -m src.competition_submission \
 Do not report private-score improvements unless the submitted zip contains only
 the intended Task 1 change and the Task 2 artifact is unchanged.
 
+## Week 6 Low-Cost Task 2 Answer-Only Runs
+
+Task 2 experiments must keep Task 1 fixed. The goal is to test whether a
+shorter answer-only multimodal prompt improves the current best post-submission
+Task 2 accuracy of `0.51`. Do not replace the default Task 2 artifact unless
+locked-validation metrics and post-submission notes both support the change.
+
+Comparable validation rows:
+
+| Row | Config or artifact | Prompt | Examples | Notes |
+| --- | --- | --- | --- | --- |
+| Current best Task 2 | `configs/experiments/vlsp_task2_qwen25vl_7b_fusion_text.yaml` or saved best artifact | shorter fusion text prompt | no answer-only examples | baseline to beat before private run |
+| Answer-only no examples | `configs/experiments/lowcost_task2_qwen_answer_only_no_examples.yaml` | answer label only | none | isolates prompt-output format benefit |
+| Answer-only few-shot | `configs/experiments/lowcost_task2_qwen_answer_only.yaml` | answer label only | up to 3 retrieved train examples with images | main W6 candidate |
+
+Run in stages with the OpenAI-compatible Qwen2.5-VL endpoint configured:
+
+```bash
+export OPENAI_COMPATIBLE_BASE_URL="http://<gpu-host>:8000/v1"
+export OPENAI_COMPATIBLE_API_KEY="..."
+export OPENAI_COMPATIBLE_MODEL="Qwen/Qwen2.5-VL-7B-Instruct"
+
+bash scripts/evaluate.sh run-w6-lowcost-task2-matrix 5
+bash scripts/evaluate.sh run-w6-lowcost-task2-matrix 20
+```
+
+Only run full validation after the `--limit 20` smoke shows acceptable parser
+success and latency:
+
+```bash
+bash scripts/evaluate.sh run-w6-lowcost-task2 full \
+  configs/experiments/lowcost_task2_qwen_answer_only_no_examples.yaml
+
+bash scripts/evaluate.sh run-w6-lowcost-task2 full \
+  configs/experiments/lowcost_task2_qwen_answer_only.yaml
+```
+
+Metrics to copy into the report:
+
+- `qa.accuracy` and `qa.by_question_type`
+- `qa.invalid_label_count`
+- `qa.missing_prediction_count`
+- `parse.parse_failure_count`
+- `parse.invalid_json_count`
+- `parse.truncated_output_count`
+- `latency_ms`
+- `qa.prediction_distribution`
+
+Generate private Task 2 only if full validation is competitive:
+
+```bash
+python -m src.pipeline \
+  --mode vlsp-test \
+  --set-name private_test \
+  --task task2 \
+  --config configs/experiments/lowcost_task2_qwen_answer_only.yaml \
+  --output data/outputs/competitions/private_task2_lowcost_answer_only.jsonl
+
+python -m src.competition_submission \
+  --set-name private_test \
+  --task task2 \
+  --task2-predictions data/outputs/competitions/private_task2_lowcost_answer_only.jsonl \
+  --allow-missing \
+  --dry-run
+```
+
+Record every private attempt with the exact Task 1 artifact paired with it.
+If validation improves but the private score drops, keep the old Task 2 file as
+the default submission component and document the mismatch.
+
 ## Final Defense Reproducibility Pack
 
 Use this checklist before copying any number into the final report or slides.

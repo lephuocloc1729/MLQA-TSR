@@ -11,6 +11,7 @@ from src.evaluate import (
     read_prediction_jsonl,
     score_retrieval_sample,
 )
+from src.utils import load_config
 
 
 LAW_ID = "QCVN 41:2024/BGTVT"
@@ -71,6 +72,8 @@ def test_invalid_prediction_is_counted_not_silently_corrected():
 
     assert artifact["qa"]["accuracy"] == 0.0
     assert artifact["qa"]["total"] == 1
+    assert artifact["qa"]["invalid_label_count"] == 1
+    assert artifact["qa"]["missing_prediction_count"] == 0
     assert artifact["invalid_prediction_count"] == 1
     assert artifact["invalid_predictions"][0]["id"] == "s1"
     assert "invalid Multiple choice prediction answer" in artifact["invalid_predictions"][0][
@@ -253,6 +256,8 @@ def test_invalid_json_and_truncated_predictions_are_counted_as_incorrect():
 
     assert artifact["qa"]["accuracy"] == 0.0
     assert artifact["qa"]["total"] == 2
+    assert artifact["qa"]["invalid_label_count"] == 0
+    assert artifact["qa"]["missing_prediction_count"] == 2
     assert artifact["invalid_prediction_count"] == 2
     assert artifact["parse"]["parse_failure_count"] == 2
     assert artifact["parse"]["invalid_json_count"] == 1
@@ -319,6 +324,8 @@ def test_wrong_answers_stay_separate_from_parse_and_truncation_failures():
         "A": 1,
         "__MISSING__": 1,
     }
+    assert artifact["qa"]["invalid_label_count"] == 0
+    assert artifact["qa"]["missing_prediction_count"] == 1
     assert artifact["invalid_prediction_count"] == 1
     assert artifact["failed_sample_ids"] == ["adapter_truncated"]
     assert artifact["parse"]["parse_success_count"] == 1
@@ -355,6 +362,123 @@ def test_tiny_fixture_evaluates_and_is_serializable():
     assert artifact["sample_count"] == 3
     assert artifact["invalid_prediction_count"] == 1
     assert artifact["qa"]["by_question_type"]["Multiple choice"]["total"] == 2
+
+
+def test_answer_only_artifact_evaluation_counts_labels_and_parse_status():
+    config = {
+        "project": {"seed": 42},
+        "experiment": {
+            "name": "lowcost_task2_qwen_answer_only",
+            "label": "LowCost answer-only",
+            "mock": False,
+            "retrieval_strategy": "fusion",
+            "prompt_variant": "lowcost_answer_only_fewshot",
+        },
+        "model": {
+            "backend": "openai_compatible",
+            "name": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "max_new_tokens": 32,
+            "include_image": True,
+        },
+    }
+    records = [
+        {
+            "query": {
+                "id": "s1",
+                "question_type": "Multiple choice",
+                "answer": "B",
+                "relevant_articles": [citation("22")],
+            },
+            "prediction": {
+                "id": "s1",
+                "question_type": "Multiple choice",
+                "answer": "B",
+                "citations": [citation("22")],
+                "explanation": "Answer-only benchmark prompt; no explanation requested.",
+                "raw_response": "B",
+            },
+            "predicted_articles": [citation("22")],
+            "parse": {
+                "status": "success",
+                "success": True,
+                "invalid_json": False,
+                "truncated_output": False,
+            },
+            "timings_ms": {"retrieval": 5.0, "generation": 20.0},
+        }
+    ]
+
+    artifact = build_evaluation_artifact(records, config=config)
+
+    assert artifact["mock"] is False
+    assert artifact["experiment"]["prompt_variant"] == "lowcost_answer_only_fewshot"
+    assert artifact["model"]["include_image"] is True
+    assert artifact["model"]["max_new_tokens"] == 32
+    assert artifact["qa"]["accuracy"] == 1.0
+    assert artifact["qa"]["invalid_label_count"] == 0
+    assert artifact["qa"]["missing_prediction_count"] == 0
+    assert artifact["qa"]["prediction_distribution"] == {"B": 1}
+    assert artifact["parse"]["parse_success_count"] == 1
+    assert artifact["latency_ms"]["mean"] == 25.0
+
+
+def test_answer_only_invalid_label_error_counts_as_invalid_label_not_missing():
+    records = [
+        {
+            "query": {
+                "id": "bad_label",
+                "question_type": "Multiple choice",
+                "answer": "B",
+                "relevant_articles": [citation("22")],
+            },
+            "prediction": {
+                "id": "bad_label",
+                "question_type": "Multiple choice",
+                "answer": None,
+                "citations": [],
+                "explanation": "Model error: ValueError: multiple-choice prediction must be A, B, C or D",
+                "error": {
+                    "type": "ValueError",
+                    "message": "multiple-choice prediction must be A, B, C or D",
+                },
+            },
+            "parse": {
+                "status": "error",
+                "success": False,
+                "invalid_json": False,
+                "truncated_output": False,
+            },
+        }
+    ]
+
+    artifact = build_evaluation_artifact(records)
+
+    assert artifact["qa"]["accuracy"] == 0.0
+    assert artifact["qa"]["invalid_label_count"] == 1
+    assert artifact["qa"]["missing_prediction_count"] == 0
+    assert artifact["qa"]["prediction_distribution"] == {"__INVALID__": 1}
+    assert artifact["invalid_prediction_count"] == 1
+    assert artifact["invalid_predictions"][0]["reason"] == (
+        "invalid prediction label rejected by parser"
+    )
+
+
+def test_lowcost_prompt_configs_load_and_share_locked_validation_split():
+    fewshot = load_config("configs/experiments/lowcost_task2_qwen_answer_only.yaml")
+    no_examples = load_config(
+        "configs/experiments/lowcost_task2_qwen_answer_only_no_examples.yaml"
+    )
+
+    assert fewshot["experiment"]["prompt_variant"] == "lowcost_answer_only_fewshot"
+    assert no_examples["experiment"]["prompt_variant"] == "lowcost_answer_only_fewshot"
+    assert fewshot["experiment"]["split"] == "val"
+    assert no_examples["experiment"]["split"] == "val"
+    assert fewshot["model"]["temperature"] == 0.0
+    assert no_examples["model"]["temperature"] == 0.0
+    assert fewshot["model"]["include_image"] is True
+    assert no_examples["model"]["include_image"] is True
+    assert fewshot["experiment"]["use_examples"] is True
+    assert no_examples["experiment"]["use_examples"] is False
 
 
 def test_default_metrics_path_is_saved_beside_predictions():
