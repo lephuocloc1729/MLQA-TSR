@@ -325,6 +325,22 @@ The packager does not fill missing answers with default labels. Task 1 rows
 contain `relevant_articles` and no `answer`; Task 2 rows contain both
 `relevant_articles` and a legal `answer`.
 
+For hybrid post-submission attempts, create a named zip before updating the
+generic `submission.zip`:
+
+```bash
+bash scripts/evaluate.sh hybrid-submission \
+  hybrid_task1_lowcost_task2_best \
+  data/outputs/competitions/private_task1_lowcost_t10_i5_o3.jsonl \
+  data/outputs/competitions/private_task2_best.jsonl \
+  private_test
+```
+
+The wrapper validates both tasks, creates
+`data/outputs/submissions/submission_<candidate>.zip`, backs up any previous
+`submission.zip`, copies the named zip to `submission.zip`, and prints a
+SHA256 row for [`docs/vlsp-postsubmission-log.md`](docs/vlsp-postsubmission-log.md).
+
 ## VLSP Public/Private Test Runner
 
 Generate public/private prediction JSONL artifacts before packaging. Task 1 is

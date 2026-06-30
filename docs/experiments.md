@@ -681,6 +681,34 @@ Record every private attempt with the exact Task 1 artifact paired with it.
 If validation improves but the private score drops, keep the old Task 2 file as
 the default submission component and document the mismatch.
 
+## Week 6 Hybrid Submission Ladder
+
+Use [`docs/vlsp-postsubmission-log.md`](vlsp-postsubmission-log.md) as the
+source of truth for private post-submission attempts. The ladder isolates one
+subtask at a time:
+
+| Step | Task 1 | Task 2 | Purpose |
+| --- | --- | --- | --- |
+| A | low-cost Task 1 | current best Task 2 | measure Task 1 lift only |
+| B | current best Task 1 | low-cost answer-only Task 2 | measure Task 2 prompt lift only |
+| C | low-cost Task 1 ablation | current best Task 2 | measure Task 1 top-k/retrieval changes |
+
+Build a named hybrid package and update `submission.zip`:
+
+```bash
+bash scripts/evaluate.sh hybrid-submission \
+  hybrid_task1_lowcost_task2_best \
+  data/outputs/competitions/private_task1_lowcost_t10_i5_o3.jsonl \
+  data/outputs/competitions/private_task2_best.jsonl \
+  private_test
+```
+
+The wrapper refuses to overwrite an existing candidate directory or named zip,
+backs up any existing `data/outputs/submissions/submission.zip`, verifies that
+the zip contains exactly `submission_task1.json` and `submission_task2.json`,
+and prints a ledger-ready row with the SHA256 hash. Copy that row into
+`docs/vlsp-postsubmission-log.md` before uploading to Codabench.
+
 ## Final Defense Reproducibility Pack
 
 Use this checklist before copying any number into the final report or slides.
