@@ -22,5 +22,14 @@ lowcost_features:
     - octagon sign
     - stop sign
 
+lowcost_retrieval:
+  collection_name: traffic_train_examples_lowcost
+  batch_size: 64
+  index_manifest_path: data/outputs/lowcost_features/index_manifest.json
+  dimensions:
+    text_vector: 1024
+    image_general_feature_vector: 2304
+    image_object_feature_vector: 2304
+
 output:
   lowcost_feature_dir: data/outputs/lowcost_features
