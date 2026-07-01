@@ -4,6 +4,7 @@ from pathlib import Path
 from src.pipeline import (
     DEMO_DISCLAIMER,
     build_demo_inspection,
+    build_freeform_demo_inspection,
     demo_model_status,
     load_cached_prediction_index,
     make_demo_inspection_record,
@@ -126,6 +127,49 @@ def test_build_demo_inspection_retrieval_none_runs_without_docker_or_models(tmp_
     assert record["retrieval"]["evidence"] == []
     assert record["prediction"] is None
     assert record["model"]["mode"] == "retrieval_only"
+
+
+def test_build_freeform_demo_retrieval_only_uses_uploaded_image_without_choices(tmp_path):
+    image_path = tmp_path / "uploaded.jpg"
+    image_path.write_bytes(b"not-a-real-image-but-path-exists")
+    config = {
+        "retrieval": {"top_k": 5},
+        "model": {"name": "mock-vlm"},
+    }
+
+    record = build_freeform_demo_inspection(
+        image_path=image_path,
+        question="Tôi có được dừng xe ở vị trí này không?",
+        config=config,
+        top_k=3,
+        retrieval_strategy_name="none",
+        prediction_mode="retrieval_only",
+    )
+
+    assert record["sample"]["id"] == "freeform_demo"
+    assert record["sample"]["question_type"] == "Free-form"
+    assert record["sample"]["choices"] == {}
+    assert record["local_image_path"] == str(image_path)
+    assert record["retrieval"]["strategy"] == "none"
+    assert record["prediction"] is None
+
+
+def test_build_freeform_demo_mock_answer_is_marked_as_freeform(tmp_path):
+    image_path = tmp_path / "uploaded.jpg"
+    image_path.write_bytes(b"not-a-real-image-but-path-exists")
+
+    record = build_freeform_demo_inspection(
+        image_path=image_path,
+        question="Biển báo này áp dụng cho xe máy không?",
+        config={"retrieval": {"top_k": 5}, "model": {"name": "mock-vlm"}},
+        retrieval_strategy_name="none",
+        prediction_mode="mock",
+    )
+
+    assert record["model"]["mode"] == "mock_prediction"
+    assert record["prediction"]["answer"]
+    assert record["prediction"]["source"] == "mock_prediction"
+    assert "Mock smoke" in record["prediction"]["explanation"]
 
 
 def test_cached_prediction_loading_and_demo_display(tmp_path):

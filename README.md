@@ -99,10 +99,10 @@ make qdrant-down
 
 ## Final Streamlit Demo
 
-Week 4 includes a final evidence-grounded Streamlit demo for defense. It can
-run without a live GPU/API by using retrieval-only mode or cached prediction
-display. Live VLM mode is optional and appears only when the configured backend
-credentials are available.
+The Streamlit demo is product-oriented free-form QA: upload a traffic image,
+ask a natural-language legal question, inspect retrieved law articles, and
+optionally call a live VLM for a cited answer. Benchmark multiple-choice
+answering is intentionally kept in the CLI pipeline, not in the demo UI.
 
 Prepare local data and indexes:
 
@@ -128,16 +128,17 @@ bash scripts/demo.sh
 
 The app supports:
 
-- retrieval-only evidence inspection;
-- cached prediction display from JSONL artifacts under `data/outputs/`;
+- image upload plus free-form question input;
+- retrieval-only evidence inspection without GPU/API credentials;
 - optional live VLM answering when backend credentials are configured;
-- curated success/failure samples for presentation;
+- mock smoke mode for checking UI behavior without reporting model quality;
 - visible citations, evidence scores, answer, explanation, latency, and a
   research/legal disclaimer.
 
-For cached prediction mode, point the sidebar to a JSONL artifact such as
-`data/outputs/experiments/w4_structured_rag.jsonl`. If no live VLM backend is
-configured, the demo stays in retrieval-only mode and shows a clear message.
+Uploaded images are stored under ignored local output storage
+`data/outputs/demo_uploads/`. If no live VLM backend is configured, the demo
+stays in retrieval-only mode and shows a clear message. Suggested presentation
+questions are in [`docs/freeform-demo-cases.md`](docs/freeform-demo-cases.md).
 
 ## Week 2 Retrieval And Few-Shot Release
 
@@ -371,6 +372,31 @@ Use `--limit 5` for smoke runs. If credentials are missing, real Task 2 runs
 fail before generating fake answers. Mock runs are allowed only for plumbing
 checks and stay labeled with `mock=true` in the artifact.
 
+## Low-Cost Task 1 GPU Run
+
+The current best no-GPU post-submission Task 1 candidate is example-fusion
+top-3 with F2 `0.449`, paired with the repaired answer-only Task 2 artifact
+at accuracy `0.56`. Before trying heavier training, run the full low-cost
+feature path on a rented GPU and compare it against that `0.449` Task 1 score.
+
+```bash
+make setup
+make lowcost-task1-gpu
+```
+
+Useful overrides:
+
+```bash
+FEATURE_DIR=data/outputs/lowcost_features_gpu \
+TASK2_ARTIFACT=data/outputs/competitions/private_task2_lowcost_answer_only_no_examples_repaired_strict.jsonl \
+CANDIDATE=task1_lowcost_gpu_t10_i5_o3_task2_answer_only_repaired \
+make lowcost-task1-gpu
+```
+
+The wrapper checks CUDA, caches train/private low-cost features, indexes the
+train examples in Qdrant, generates Task 1 predictions, and packages a named
+hybrid zip when the Task 2 artifact exists.
+
 ## Final Report And Defense Pack
 
 Week 4 final documentation is organized for defense and reproducibility:
@@ -389,6 +415,8 @@ Week 4 final documentation is organized for defense and reproducibility:
 - [`docs/final-slides.md`](docs/final-slides.md): slide source for the final
   presentation.
 - [`docs/assets/`](docs/assets/): screenshot/asset notes for the demo.
+- [`docs/freeform-demo-cases.md`](docs/freeform-demo-cases.md): suggested
+  free-form demo questions for presentation.
 
 Before reporting any number, verify that it comes from a metrics JSON artifact
 or a documented local GPU smoke log. Mock rows must stay labeled as smoke

@@ -79,6 +79,9 @@ the packaging command or the verification snippet above.
 | date | candidate | Task 1 artifact | Task 2 artifact | zip path | sha256 | Codabench Task 1 F2 | Codabench Task 2 accuracy | internal validation source | notes |
 | --- | --- | --- | --- | --- | --- | ---: | ---: | --- | --- |
 | TBD | `hybrid_task1_lowcost_task2_best` | `data/outputs/competitions/private_task1_lowcost_t10_i5_o3.jsonl` | `data/outputs/competitions/private_task2_best.jsonl` | `data/outputs/submissions/submission_hybrid_task1_lowcost_task2_best.zip` | TBD | TBD | TBD | Task 1 validation ablation + current best Task 2 metrics | isolates Task 1; fill only after packaging/upload |
+| 2026-07-01 | `task1_example_fusion_top1_task2_answer_only_repaired` | `data/outputs/competitions/private_task1_example_fusion_top1.jsonl` | `data/outputs/competitions/private_task2_lowcost_answer_only_no_examples_repaired_strict.jsonl` | `data/outputs/submissions/submission_task1_example_fusion_top1_task2_answer_only_repaired.zip` | `8fd5d984d8f655c7f2ac165c846d07bab6ae0d9dc141d2c7506c43363c12d5b4` | `0.3671` | `0.56` | Codabench post-submission | top-1 example-citation union; improved over old Task 1 but not best |
+| 2026-07-01 | `task1_example_fusion_top3_task2_answer_only_repaired` | `data/outputs/competitions/private_task1_example_fusion_top3.jsonl` | `data/outputs/competitions/private_task2_lowcost_answer_only_no_examples_repaired_strict.jsonl` | `data/outputs/submissions/submission_task1_example_fusion_top3_task2_answer_only_repaired.zip` | `767701beaec98c8c8e7ad9efb88d7356f5994fd0d10ff275009985834d244775` | `0.449` | `0.56` | Codabench post-submission | current best hybrid candidate; keep `submission.zip` pointing here |
+| 2026-07-01 | `task1_example_fusion_top5_task2_answer_only_repaired` | `data/outputs/competitions/private_task1_example_fusion_top5.jsonl` | `data/outputs/competitions/private_task2_lowcost_answer_only_no_examples_repaired_strict.jsonl` | `data/outputs/submissions/submission_task1_example_fusion_top5_task2_answer_only_repaired.zip` | `b9a40528d902aace2c05ee9012ecf75f756f62fc3a9a46a1d37a00a4fc1fc691` | `0.439` | `0.56` | Codabench post-submission | top-5 retrieved too much noise; worse than top-3 |
 
 ## Score Notes
 
@@ -104,3 +107,4 @@ Decision:
 | date | decision | reason | owner |
 | --- | --- | --- | --- |
 | 2026-06-30 | Start with candidate A before changing Task 2. | Isolates low-cost Task 1 retrieval from answer-only VLM experiments. | M1/M4 |
+| 2026-07-01 | Use example-fusion top-3 as the current upload candidate. | Top-3 reached Task 1 F2 `0.449`, better than top-1 `0.3671`, top-5 `0.439`, and old `0.33` baseline, while Task 2 stayed fixed at `0.56`. | M1/M4 |

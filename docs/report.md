@@ -143,6 +143,22 @@ repo state does not contain real-backend metrics JSON. The non-mock pipeline is
 wired, but live execution requires `OPENAI_COMPATIBLE_BASE_URL` and
 `OPENAI_COMPATIBLE_API_KEY`.
 
+### VLSP Post-Submission Notes
+
+The post-submission ledger in `docs/vlsp-postsubmission-log.md` records the
+manual Codabench checks. With Task 2 fixed at accuracy `0.56`, the Task 1
+example-citation union improved from the older `0.33` baseline to:
+
+| Task 1 candidate | F2 | Decision |
+| --- | ---: | --- |
+| top-1 retrieved train example | `0.3671` | not best |
+| top-3 retrieved train examples | `0.449` | current upload candidate |
+| top-5 retrieved train examples | `0.439` | slightly noisier than top-3 |
+
+The next improvement attempt is the full GPU low-cost feature path, not larger
+QLoRA training. It should be compared against the current Task 1 target
+`0.449`.
+
 ## QLoRA Diagnostic
 
 The QLoRA path is real and reproducible, but it is not the main final product.
@@ -176,12 +192,13 @@ These are integration diagnostics, not leaderboard-quality validation metrics.
 
 The final Streamlit demo supports:
 
+- image upload plus free-form legal question answering;
 - retrieval-only evidence inspection;
 - cached prediction display from JSONL artifacts;
 - mock smoke prediction for offline presentations;
 - live VLM calls only when a backend is configured.
 
-The demo shows the image, question, choices, retrieved evidence, citation IDs,
+The demo shows the uploaded image, free-form question, retrieved evidence, citation IDs,
 scores, answer, explanation, latency, output mode, and a clear research/legal
 disclaimer.
 

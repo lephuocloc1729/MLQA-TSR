@@ -10,6 +10,8 @@ from src.lowcost_features import (
     build_manifest,
     format_lowcost_text,
     load_feature_samples,
+    normalize_owlv2_labels,
+    patch_transformers_tied_weights_compatibility,
     run_feature_cache,
 )
 from src.utils import read_json, write_json, write_jsonl
@@ -256,3 +258,30 @@ def test_manifest_compatibility_helper_detects_model_changes(tmp_path):
 
     with pytest.raises(ValueError, match="manifest mismatch"):
         assert_manifest_compatible(changed, manifest)
+
+
+def test_owlv2_label_normalization_supports_numeric_and_string_labels():
+    labels = normalize_owlv2_labels([0, "traffic sign", 99], ["traffic sign", "circle sign"])
+
+    assert labels == ["traffic sign", "traffic sign", "99"]
+
+
+def test_transformers_tied_weights_compatibility_patch_allows_assignment():
+    pytest.importorskip("transformers")
+    from transformers.modeling_utils import PreTrainedModel
+
+    original = getattr(PreTrainedModel, "all_tied_weights_keys", None)
+    try:
+        patch_transformers_tied_weights_compatibility()
+        instance = object.__new__(PreTrainedModel)
+        instance.all_tied_weights_keys = ["a", "b"]
+
+        assert instance.all_tied_weights_keys == ["a", "b"]
+    finally:
+        if original is None:
+            try:
+                delattr(PreTrainedModel, "all_tied_weights_keys")
+            except AttributeError:
+                pass
+        else:
+            PreTrainedModel.all_tied_weights_keys = original

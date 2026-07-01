@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -8,39 +9,21 @@ import streamlit as st
 from src.pipeline import (
     BenchmarkRuntime,
     DEMO_DISCLAIMER,
-    build_demo_inspection,
+    build_freeform_demo_inspection,
     demo_model_status,
-    load_cached_prediction_index,
-    load_demo_samples,
     normalize_demo_prediction_mode,
 )
 from src.utils import load_config
 
 
 DEFAULT_CONFIG_PATH = "configs/config.yaml"
-DEFAULT_CACHED_PREDICTIONS = "data/outputs/experiments/w4_structured_rag.jsonl"
-CURATED_CASES = [
-    ("train_1", "Success-style: general prohibition article appears in retrieved evidence."),
-    ("train_116", "Failure-style: visual ambiguity, danger/warning sign family."),
-    ("train_134", "Hard case: no-stopping/no-parking sign confusion."),
-    ("train_203", "Legal-context case: traffic-controller order priority."),
-    ("train_239", "Hard case: visually similar parking/stopping signs."),
-]
+UPLOAD_DIR = Path("data/outputs/demo_uploads")
+ALLOWED_IMAGE_TYPES = ["jpg", "jpeg", "png", "webp"]
 
 
 @st.cache_data(show_spinner=False)
 def cached_config(config_path: str) -> dict[str, Any]:
     return load_config(config_path)
-
-
-@st.cache_data(show_spinner=False)
-def cached_samples(config_path: str, split: str) -> list[dict[str, Any]]:
-    return load_demo_samples(cached_config(config_path), split=split)
-
-
-@st.cache_data(show_spinner=False)
-def cached_prediction_index(path: str) -> dict[str, Any]:
-    return load_cached_prediction_index(path)
 
 
 @st.cache_resource(show_spinner=False)
@@ -55,42 +38,45 @@ def cached_runtime(config_path: str, use_live_backend: bool) -> BenchmarkRuntime
     return BenchmarkRuntime(runtime_config)
 
 
-def format_sample_option(sample: dict[str, Any]) -> str:
-    sample_id = sample.get("id", "(missing id)")
-    image_id = sample.get("image_id", "(missing image)")
-    question_type = sample.get("question_type", "(unknown)")
-    return f"{sample_id} | {image_id} | {question_type}"
+def mode_to_internal(label: str) -> str:
+    return {
+        "Retrieval-only": "retrieval_only",
+        "Live VLM": "live",
+        "Mock smoke": "mock",
+    }[label]
 
 
-def render_question(sample: dict[str, Any]) -> None:
-    st.subheader("Question")
+def persist_uploaded_image(uploaded_file: Any) -> Path:
+    payload = uploaded_file.getvalue()
+    digest = hashlib.sha256(payload).hexdigest()[:16]
+    suffix = Path(uploaded_file.name).suffix.lower() or ".jpg"
+    if suffix.lstrip(".") not in ALLOWED_IMAGE_TYPES:
+        suffix = ".jpg"
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    path = UPLOAD_DIR / f"freeform_{digest}{suffix}"
+    path.write_bytes(payload)
+    return path
+
+
+def render_question(result: dict[str, Any]) -> None:
+    sample = result["sample"]
+    st.subheader("Free-Form Question")
     st.write(sample["question"])
-    st.caption(f"Sample: `{sample['id']}` | Image: `{sample['image_id']}`")
-
-    choices = sample.get("choices") or {}
-    if choices:
-        st.markdown("**Choices**")
-        for key in sorted(choices):
-            st.write(f"**{key}.** {choices[key]}")
-    else:
-        st.info("This sample has no A/B/C/D choices.")
+    st.caption(
+        f"Image: `{sample['image_display_name']}` | Mode: free-form legal QA"
+    )
 
 
-def render_image(local_image_path: str | None, sample: dict[str, Any]) -> None:
-    st.subheader("Image")
+def render_image(local_image_path: str | None, result: dict[str, Any]) -> None:
+    st.subheader("Uploaded Image")
     if not local_image_path:
-        st.warning("This sample does not include a local image path.")
+        st.warning("No uploaded image path was provided.")
         return
-
     image_path = Path(local_image_path)
     if not image_path.exists():
-        st.warning(
-            "Image file is missing locally. Check data/raw placement before the demo."
-        )
-        st.caption(f"Expected image file name: `{sample['image_display_name']}`")
+        st.warning("Uploaded image is missing from local demo storage.")
         return
-
-    st.image(str(image_path), caption=sample["image_display_name"], use_container_width=True)
+    st.image(str(image_path), caption=result["sample"]["image_display_name"], use_container_width=True)
 
 
 def render_evidence(result: dict[str, Any]) -> None:
@@ -103,11 +89,7 @@ def render_evidence(result: dict[str, Any]) -> None:
 
     citation_ids = retrieval.get("citation_ids", [])
     if citation_ids:
-        st.text_area(
-            "Citation IDs for copy/debug",
-            "\n".join(citation_ids),
-            height=100,
-        )
+        st.text_area("Citation IDs", "\n".join(citation_ids), height=96)
     else:
         st.warning("No legal evidence was retrieved.")
 
@@ -131,8 +113,8 @@ def render_evidence(result: dict[str, Any]) -> None:
             st.json(diagnostics)
 
 
-def render_prediction(result: dict[str, Any]) -> None:
-    st.subheader("Answer")
+def render_answer(result: dict[str, Any]) -> None:
+    st.subheader("Free-Form Answer")
     model = result.get("model") or {}
     st.caption(
         f"Output mode: `{model.get('label') or model.get('mode', 'unknown')}`"
@@ -140,18 +122,14 @@ def render_prediction(result: dict[str, Any]) -> None:
 
     prediction = result.get("prediction")
     if not prediction:
-        st.info(model.get("reason") or "Prediction is not available in this mode.")
+        st.info(model.get("reason") or "Answer is not available in this mode.")
         return
 
     answer = prediction.get("answer")
     if answer:
-        st.success(f"Answer: {answer}")
+        st.success(answer)
     else:
-        st.warning("No valid answer was produced for this sample.")
-
-    confidence = prediction.get("confidence")
-    if confidence is not None:
-        st.write(f"Confidence: `{confidence}`")
+        st.warning("No valid free-form answer was produced.")
 
     explanation = prediction.get("explanation")
     if explanation:
@@ -164,17 +142,21 @@ def render_prediction(result: dict[str, Any]) -> None:
         for citation in citations:
             st.code(f"{citation['law_id']}#{citation['article_id']}")
 
+    confidence = prediction.get("confidence")
+    if confidence is not None:
+        st.write(f"Confidence: `{confidence}`")
+
+    if prediction.get("abstained"):
+        st.warning("The model abstained because evidence was insufficient.")
+
     parse = prediction.get("parse") or {}
     if parse:
-        st.markdown("**Parse status**")
-        st.json(parse)
+        with st.expander("Parse status", expanded=False):
+            st.json(parse)
 
     error = prediction.get("error") or {}
     if error:
         st.error(f"{error.get('type', 'Error')}: {error.get('message', '')}")
-
-    if prediction.get("abstained"):
-        st.warning("The model abstained.")
 
 
 def render_latency(result: dict[str, Any]) -> None:
@@ -191,148 +173,107 @@ def render_latency(result: dict[str, Any]) -> None:
         st.json(latency)
 
 
-def select_curated_sample(samples: list[dict[str, Any]]) -> dict[str, Any] | None:
-    sample_by_id = {sample.get("id"): sample for sample in samples}
-    available = [
-        (sample_id, note)
-        for sample_id, note in CURATED_CASES
-        if sample_id in sample_by_id
-    ]
-    if not available:
-        return None
-    label = st.selectbox(
-        "Curated presentation case",
-        available,
-        format_func=lambda item: f"{item[0]} - {item[1]}",
-    )
-    return sample_by_id[label[0]]
-
-
-def mode_to_internal(label: str) -> str:
-    return {
-        "Retrieval-only": "retrieval_only",
-        "Cached prediction": "cached",
-        "Live VLM": "live",
-        "Mock smoke": "mock",
-    }[label]
-
-
 def main() -> None:
     st.set_page_config(
-        page_title="Traffic Legal VLM Final Demo",
+        page_title="Traffic Legal VLM Free-Form Demo",
         layout="wide",
     )
-    st.title("Traffic Legal VLM - Final Evidence-Grounded Demo")
+    st.title("Traffic Legal VLM - Free-Form Legal QA Demo")
     st.caption(
-        "Defense-ready demo for retrieval inspection, cached prediction display, "
-        "and optional live VLM answering."
+        "Upload a traffic image, ask a natural-language question, inspect retrieved "
+        "legal evidence, and optionally call a live VLM for a cited answer."
     )
     st.warning(DEMO_DISCLAIMER)
 
     with st.sidebar:
         st.header("Demo Settings")
         config_path = st.text_input("Config path", DEFAULT_CONFIG_PATH)
-        split = st.selectbox("Split", ["val", "train"], index=0)
         retrieval_strategy = st.selectbox(
             "Retrieval strategy",
             ["text", "fusion", "none"],
             index=0,
-            help="Fusion requires the training example index to exist in Qdrant.",
+            help="Fusion also uses similar train examples if the example index exists.",
         )
         top_k = st.slider("Top-k legal evidence", 1, 10, 5)
         mode_label = st.selectbox(
-            "Demo mode",
-            ["Retrieval-only", "Cached prediction", "Live VLM", "Mock smoke"],
+            "Answer mode",
+            ["Retrieval-only", "Live VLM", "Mock smoke"],
             index=0,
         )
         prediction_mode = normalize_demo_prediction_mode(mode_to_internal(mode_label))
-        cached_predictions_path = st.text_input(
-            "Cached prediction JSONL",
-            DEFAULT_CACHED_PREDICTIONS,
-            disabled=prediction_mode != "cached",
-        )
-        use_curated = st.checkbox("Use curated presentation cases", value=True)
 
     try:
         config = cached_config(config_path)
-        samples = cached_samples(config_path, split)
     except Exception as exc:
-        st.error(
-            "Could not load demo samples. Run preprocessing/split first and check "
-            "the config path."
-        )
+        st.error("Could not load config.")
         st.caption(f"{type(exc).__name__}: {exc}")
         return
 
-    if not samples:
-        st.warning(f"No samples found in `{split}` split.")
-        return
+    model_status = demo_model_status(config, prediction_mode=prediction_mode)
+    if model_status.get("available"):
+        st.success(model_status.get("reason"))
+    else:
+        st.info(model_status.get("reason"))
 
-    with st.sidebar:
-        curated_sample = select_curated_sample(samples) if use_curated else None
-        selected_sample = curated_sample or st.selectbox(
-            "Sample",
-            samples,
-            format_func=format_sample_option,
-        )
-        model_status = demo_model_status(
-            config,
-            prediction_mode=prediction_mode,
-            cached_predictions_path=cached_predictions_path,
-        )
-        if model_status.get("available"):
-            st.success(model_status.get("reason"))
-        else:
-            st.info(model_status.get("reason"))
+    uploaded_file = st.file_uploader(
+        "Upload traffic image",
+        type=ALLOWED_IMAGE_TYPES,
+        help="Use a dashcam/street image containing traffic signs or road context.",
+    )
+    question = st.text_area(
+        "Ask a free-form legal question",
+        placeholder="Ví dụ: Tôi có được đỗ xe ở vị trí này vào cuối tuần không?",
+        height=110,
+    )
 
-        if prediction_mode == "cached":
-            try:
-                cache = cached_prediction_index(cached_predictions_path)
-                st.caption(f"Cached predictions loaded: `{len(cache)}` rows")
-            except Exception as exc:
-                st.warning(f"Cached artifact unavailable: {type(exc).__name__}")
-
-        run_clicked = st.button("Run Demo", type="primary")
-
+    run_clicked = st.button("Run Free-Form QA", type="primary")
     st.info(
-        "The demo can be presented without a live GPU/API by using retrieval-only "
-        "or cached prediction mode."
+        "Benchmark multiple-choice answering is intentionally removed from this demo. "
+        "For official VLSP scoring, use the CLI submission pipeline instead."
     )
 
     if not run_clicked:
-        render_question(selected_sample)
-        st.caption("Press **Run Demo** to retrieve legal evidence and render output.")
+        st.caption("Upload an image, enter a question, then press **Run Free-Form QA**.")
+        return
+    if uploaded_file is None:
+        st.warning("Please upload an image first.")
+        return
+    if not question.strip():
+        st.warning("Please enter a free-form question.")
         return
 
+    image_path = persist_uploaded_image(uploaded_file)
     use_live_backend = prediction_mode == "live" and model_status.get("available")
     try:
-        with st.spinner("Running evidence-grounded demo..."):
-            result = build_demo_inspection(
-                sample_id=selected_sample["id"],
+        with st.spinner("Retrieving legal evidence and preparing answer..."):
+            result = build_freeform_demo_inspection(
+                image_path=image_path,
+                question=question.strip(),
                 config=config,
-                split=split,
                 top_k=top_k,
                 retrieval_strategy_name=retrieval_strategy,
                 prediction_mode=prediction_mode,
-                cached_predictions_path=cached_predictions_path,
-                runtime=cached_runtime(config_path, use_live_backend=bool(use_live_backend)),
+                runtime=cached_runtime(
+                    config_path,
+                    use_live_backend=bool(use_live_backend),
+                ),
             )
     except Exception as exc:
-        st.error("Demo run failed.")
+        st.error("Free-form demo run failed.")
         st.caption(
-            "Check Qdrant status, processed LawDB, split files, cached artifact, "
-            "and whether the selected retrieval strategy has been indexed."
+            "Check Qdrant status, processed LawDB, selected retrieval strategy, "
+            "and live backend settings if Live VLM is selected."
         )
         st.caption(f"{type(exc).__name__}: {exc}")
         return
 
     left, right = st.columns([1, 1])
     with left:
-        render_image(result.get("local_image_path"), result["sample"])
-        render_question(result["sample"])
+        render_image(result.get("local_image_path"), result)
+        render_question(result)
         render_latency(result)
     with right:
-        render_prediction(result)
+        render_answer(result)
         render_evidence(result)
 
 

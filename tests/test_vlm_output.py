@@ -127,6 +127,9 @@ def test_free_form_prompt_and_prediction_are_supported():
 
     assert prediction.answer == "Không đủ căn cứ để kết luận."
     assert "free-form" in prompt.lower()
+    assert "answer in Vietnamese" in prompt
+    assert "abstained=true" in prompt
+    assert "official legal advice" in prompt
 
 
 def test_abstained_prediction_can_omit_citations():
