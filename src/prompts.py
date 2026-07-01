@@ -338,7 +338,12 @@ def answer_instruction(query: Query) -> str:
         return "For this benchmark question, answer must be exactly one of A, B, C, D."
     if question_type == QuestionType.YES_NO:
         return "For this benchmark question, answer must be exactly one of Đúng or Sai."
-    return "For free-form demo mode, answer with a short legal conclusion."
+    return (
+        "For free-form demo mode, answer in Vietnamese with a concise legal "
+        "conclusion first, cite only retrieved legal evidence, and set "
+        "abstained=true if the image context or legal evidence is insufficient. "
+        "Do not present the answer as official legal advice."
+    )
 
 
 def structured_legal_explanation_instruction() -> str:

@@ -1,4 +1,4 @@
-.PHONY: help setup check-data check-data-all qdrant-up qdrant-down preprocess index index-examples index-week2 retrieve benchmark-b2 benchmark-b3 benchmark-b4 benchmark-week2-smoke benchmark-w3-real adapter-diagnostic qlora-dry-run qlora-smoke20 task1 task2 assistant eval demo ci-test test verify release-check clean
+.PHONY: help setup check-data check-data-all qdrant-up qdrant-down preprocess index index-examples index-week2 retrieve benchmark-b2 benchmark-b3 benchmark-b4 benchmark-week2-smoke benchmark-w3-real adapter-diagnostic qlora-dry-run qlora-smoke20 lowcost-task1-gpu task1 task2 assistant eval demo ci-test test verify release-check clean
 
 SMOKE_LIMIT ?= 5
 PYTHON_BIN := $(if $(PYTHON),$(PYTHON),$(if $(wildcard .venv/bin/python),.venv/bin/python,python))
@@ -29,6 +29,7 @@ help:
 	@echo "  make adapter-diagnostic  Run W4 QLoRA adapter diagnostic with SMOKE_LIMIT"
 	@echo "  make qlora-dry-run    Validate QLoRA config without loading model weights"
 	@echo "  make qlora-smoke20    GPU-only 20-sample QLoRA smoke command"
+	@echo "  make lowcost-task1-gpu  GPU full low-cost Task 1 feature/index/package run"
 	@echo "  make demo             Start the Streamlit demo"
 	@echo "  make release-check    Run final release preflight checks"
 
@@ -97,6 +98,9 @@ qlora-dry-run:
 
 qlora-smoke20:
 	$(PYTHON_BIN) -m src.train_qlora --config configs/qlora.yaml --max-samples 20
+
+lowcost-task1-gpu:
+	bash scripts/run_gpu_task1_lowcost.sh
 
 demo:
 	bash scripts/demo.sh

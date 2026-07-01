@@ -58,6 +58,60 @@ class ObjectDetectorBackend(Protocol):
         ...
 
 
+def patch_transformers_tied_weights_compatibility() -> None:
+    """Keep Jina remote-code loading compatible with newer Transformers builds.
+
+    Some `jina-embeddings-v3` remote-code revisions assign
+    `all_tied_weights_keys` during model initialization. Recent Transformers
+    versions may expose that attribute without a setter, which makes the load
+    fail before any weights are usable. The patch is intentionally tiny and
+    local to the low-cost feature path.
+    """
+    try:
+        from transformers.modeling_utils import PreTrainedModel
+    except Exception:
+        return
+
+    current = getattr(PreTrainedModel, "all_tied_weights_keys", None)
+    if isinstance(current, property) and current.fset is not None:
+        return
+
+    def _get(self: Any) -> list[str]:
+        value = self.__dict__.get("_all_tied_weights_keys", [])
+        return list(value or [])
+
+    def _set(self: Any, value: Any) -> None:
+        self.__dict__["_all_tied_weights_keys"] = list(value or [])
+
+    PreTrainedModel.all_tied_weights_keys = property(_get, _set)  # type: ignore[attr-defined]
+
+
+def normalize_owlv2_labels(raw_labels: Any, label_names: Sequence[str]) -> list[str]:
+    """Normalize old numeric OWLv2 labels and newer grounded string labels."""
+    if raw_labels is None:
+        return []
+    if hasattr(raw_labels, "detach"):
+        raw_labels = raw_labels.detach().cpu().numpy().tolist()
+    if not isinstance(raw_labels, Sequence) or isinstance(raw_labels, (str, bytes)):
+        raw_labels = [raw_labels]
+
+    normalized: list[str] = []
+    for label in raw_labels:
+        if isinstance(label, str):
+            normalized.append(label)
+            continue
+        try:
+            index = int(label)
+        except (TypeError, ValueError):
+            normalized.append(str(label))
+            continue
+        if 0 <= index < len(label_names):
+            normalized.append(str(label_names[index]))
+        else:
+            normalized.append(str(index))
+    return normalized
+
+
 class JinaTextFeatureBackend:
     """Jina embedding wrapper matching the low-cost reference project."""
 
@@ -68,6 +122,7 @@ class JinaTextFeatureBackend:
         self.model_name = model_name
         self.torch = torch
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        patch_transformers_tied_weights_compatibility()
         self.model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
         if hasattr(self.model, "to"):
             self.model = self.model.to(self.device)
@@ -166,16 +221,24 @@ class OwlV2ObjectDetectorBackend:
         ).to(self.device)
         with self.torch.no_grad():
             outputs = self.model(**model_inputs)
-        results = self.processor.post_process_object_detection(
-            outputs=outputs,
-            target_sizes=self.torch.Tensor(image_size).to(self.device),
-            threshold=threshold,
-        )[0]
-        label_ids = results["labels"].detach().cpu().numpy().tolist()
+        target_sizes = self.torch.Tensor(image_size).to(self.device)
+        if hasattr(self.processor, "post_process_grounded_object_detection"):
+            results = self.processor.post_process_grounded_object_detection(
+                outputs=outputs,
+                target_sizes=target_sizes,
+                threshold=threshold,
+                text_labels=[self.labels],
+            )[0]
+        else:
+            results = self.processor.post_process_object_detection(
+                outputs=outputs,
+                target_sizes=target_sizes,
+                threshold=threshold,
+            )[0]
         return {
             "boxes": results["boxes"].detach().cpu().float().numpy().tolist(),
             "scores": results["scores"].detach().cpu().float().numpy().tolist(),
-            "labels": [self.labels[int(index)] for index in label_ids],
+            "labels": normalize_owlv2_labels(results.get("labels"), self.labels),
         }
 
 

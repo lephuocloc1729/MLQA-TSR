@@ -554,6 +554,25 @@ examples from the low-cost named-vector Qdrant collection and copying the union
 of their `relevant_articles`. This is separate from direct LawDB text retrieval:
 the evidence comes from train-example citations, not from article search.
 
+### Observed Post-Submission Task 1 Results
+
+The current best submitted Task 1 strategy is the no-GPU train-example
+citation union with top-3 retrieved examples. It improved Task 1 F2 from the
+older direct-retrieval score of `0.33` to `0.449` while keeping the Task 2
+artifact fixed.
+
+| Candidate | Retrieved examples | Task 1 F2 | Decision |
+| --- | ---: | ---: | --- |
+| old direct retrieval baseline | n/a | `0.33` | superseded for Task 1 |
+| example-fusion top-1 | 1 | `0.3671` | worse than top-3 |
+| example-fusion top-3 | 3 | `0.449` | current Task 1 best |
+| example-fusion top-5 | 5 | `0.439` | slightly worse than top-3 |
+
+Keep `data/outputs/submissions/submission.zip` pointing to the top-3 hybrid
+candidate before upload. Use the GPU low-cost feature path below only as the
+next Task 1 improvement attempt; it should be compared against `0.449`, not
+against the old `0.33` baseline.
+
 Recommended configs:
 
 | Config | Query mode | Limits | Output purpose |
@@ -569,6 +588,23 @@ bash scripts/lowcost_index.sh \
   --config configs/experiments/lowcost_retrieval.yaml \
   --mode index \
   --features data/outputs/lowcost_features/train_features.jsonl
+```
+
+For a full GPU run on a rented machine, use the wrapper below after copying the
+repo, raw data, `.env` if needed, and the current best Task 2 artifact:
+
+```bash
+make setup
+make lowcost-task1-gpu
+```
+
+Useful overrides:
+
+```bash
+FEATURE_DIR=data/outputs/lowcost_features_gpu \
+TASK2_ARTIFACT=data/outputs/competitions/private_task2_lowcost_answer_only_no_examples_repaired_strict.jsonl \
+CANDIDATE=task1_lowcost_gpu_t10_i5_o3_task2_answer_only_repaired \
+make lowcost-task1-gpu
 ```
 
 Smoke Task 1 on public test:
@@ -614,8 +650,8 @@ the intended Task 1 change and the Task 2 artifact is unchanged.
 ## Week 6 Low-Cost Task 2 Answer-Only Runs
 
 Task 2 experiments must keep Task 1 fixed. The goal is to test whether a
-shorter answer-only multimodal prompt improves the current best post-submission
-Task 2 accuracy of `0.51`. Do not replace the default Task 2 artifact unless
+shorter answer-only multimodal prompt improves the current observed
+post-submission Task 2 accuracy of `0.56`. Do not replace the default Task 2 artifact unless
 locked-validation metrics and post-submission notes both support the change.
 
 Comparable validation rows:
