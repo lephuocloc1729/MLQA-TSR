@@ -1,6 +1,7 @@
 .PHONY: help setup check-data check-data-all qdrant-up qdrant-down preprocess index index-examples index-week2 retrieve benchmark-b2 benchmark-b3 benchmark-b4 benchmark-week2-smoke benchmark-w3-real adapter-diagnostic qlora-dry-run qlora-smoke20 task1 task2 assistant eval demo ci-test test verify release-check clean
 
 SMOKE_LIMIT ?= 5
+PYTHON_BIN := $(if $(PYTHON),$(PYTHON),$(if $(wildcard .venv/bin/python),.venv/bin/python,python))
 
 help:
 	@echo "Traffic Legal VLM - common commands"
@@ -32,8 +33,8 @@ help:
 	@echo "  make release-check    Run final release preflight checks"
 
 setup:
-	python -m pip install --upgrade pip
-	python -m pip install -r requirements.txt
+	$(PYTHON_BIN) -m pip install --upgrade pip
+	$(PYTHON_BIN) -m pip install -r requirements.txt
 
 check-data:
 	bash scripts/check_data.sh
@@ -48,7 +49,7 @@ qdrant-down:
 	docker compose down
 
 preprocess:
-	python -m src.data_utils --mode preprocess
+	$(PYTHON_BIN) -m src.data_utils --mode preprocess
 
 index:
 	bash scripts/index.sh law
@@ -60,16 +61,16 @@ index-week2:
 	bash scripts/index.sh week2
 
 retrieve:
-	python -m src.retrieval --mode retrieve
+	$(PYTHON_BIN) -m src.retrieval --mode retrieve
 
 task1:
-	python -m src.pipeline --mode task1
+	$(PYTHON_BIN) -m src.pipeline --mode task1
 
 task2:
-	python -m src.pipeline --mode task2
+	$(PYTHON_BIN) -m src.pipeline --mode task2
 
 assistant:
-	python -m src.pipeline --mode assistant
+	$(PYTHON_BIN) -m src.pipeline --mode assistant
 
 eval:
 	bash scripts/evaluate.sh
@@ -92,27 +93,27 @@ adapter-diagnostic:
 	bash scripts/evaluate.sh adapter-diagnostic $(SMOKE_LIMIT)
 
 qlora-dry-run:
-	python -m src.train_qlora --config configs/qlora.yaml --dry-run
+	$(PYTHON_BIN) -m src.train_qlora --config configs/qlora.yaml --dry-run
 
 qlora-smoke20:
-	python -m src.train_qlora --config configs/qlora.yaml --max-samples 20
+	$(PYTHON_BIN) -m src.train_qlora --config configs/qlora.yaml --max-samples 20
 
 demo:
 	bash scripts/demo.sh
 
 ci-test:
-	python -c 'import sys, types; sys.modules.setdefault("readline", types.ModuleType("readline")); import pytest; raise SystemExit(pytest.main(["-q", "tests/test_schemas.py"], plugins=[]))'
+	$(PYTHON_BIN) -c 'import sys, types; sys.modules.setdefault("readline", types.ModuleType("readline")); import pytest; raise SystemExit(pytest.main(["-q", "tests/test_schemas.py"], plugins=[]))'
 
 test:
-	python -c 'import sys, types; sys.modules.setdefault("readline", types.ModuleType("readline")); import pytest; raise SystemExit(pytest.main(["-q", "tests"], plugins=[]))'
+	$(PYTHON_BIN) -c 'import sys, types; sys.modules.setdefault("readline", types.ModuleType("readline")); import pytest; raise SystemExit(pytest.main(["-q", "tests"], plugins=[]))'
 
 verify: ci-test
-	python -m pip check
+	$(PYTHON_BIN) -m pip check
 	git diff --check
 
 release-check: verify
-	python -m src.evaluate --help >/dev/null
-	python -m src.submission --help >/dev/null
+	$(PYTHON_BIN) -m src.evaluate --help >/dev/null
+	$(PYTHON_BIN) -m src.submission --help >/dev/null
 	bash scripts/check_data.sh --all
 	git status --ignored --short
 

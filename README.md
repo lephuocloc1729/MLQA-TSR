@@ -99,10 +99,10 @@ make qdrant-down
 
 ## Final Streamlit Demo
 
-Week 4 includes a final evidence-grounded Streamlit demo for defense. It can
-run without a live GPU/API by using retrieval-only mode or cached prediction
-display. Live VLM mode is optional and appears only when the configured backend
-credentials are available.
+The Streamlit demo is product-oriented free-form QA: upload a traffic image,
+ask a natural-language legal question, inspect retrieved law articles, and
+optionally call a live VLM for a cited answer. Benchmark multiple-choice
+answering is intentionally kept in the CLI pipeline, not in the demo UI.
 
 Prepare local data and indexes:
 
@@ -128,16 +128,16 @@ bash scripts/demo.sh
 
 The app supports:
 
-- retrieval-only evidence inspection;
-- cached prediction display from JSONL artifacts under `data/outputs/`;
+- image upload plus free-form question input;
+- retrieval-only evidence inspection without GPU/API credentials;
 - optional live VLM answering when backend credentials are configured;
-- curated success/failure samples for presentation;
+- mock smoke mode for checking UI behavior without reporting model quality;
 - visible citations, evidence scores, answer, explanation, latency, and a
   research/legal disclaimer.
 
-For cached prediction mode, point the sidebar to a JSONL artifact such as
-`data/outputs/experiments/w4_structured_rag.jsonl`. If no live VLM backend is
-configured, the demo stays in retrieval-only mode and shows a clear message.
+Uploaded images are stored under ignored local output storage
+`data/outputs/demo_uploads/`. If no live VLM backend is configured, the demo
+stays in retrieval-only mode and shows a clear message.
 
 ## Week 2 Retrieval And Few-Shot Release
 

@@ -977,6 +977,126 @@ def build_demo_inspection(
     )
 
 
+def build_freeform_demo_inspection(
+    image_path: str | Path,
+    question: str,
+    config: Mapping[str, Any],
+    top_k: int | None = None,
+    retrieval_strategy_name: str = "text",
+    prediction_mode: str | None = None,
+    include_prediction: bool = False,
+    use_mock_prediction: bool = False,
+    environ: Mapping[str, str] | None = None,
+    runtime: BenchmarkRuntime | None = None,
+    query_id: str = "freeform_demo",
+    prompt_variant_name: str | None = None,
+) -> dict[str, Any]:
+    """Run the product-style demo: uploaded image + free-form question."""
+    image_path = Path(image_path)
+    if not image_path.exists():
+        raise FileNotFoundError(f"Free-form demo image not found: {image_path}")
+
+    query = Query(
+        id=query_id,
+        image_id=image_path.stem,
+        image_path=str(image_path),
+        question=question,
+        question_type=QuestionType.FREE_FORM,
+    )
+    mode = normalize_demo_prediction_mode(
+        prediction_mode,
+        include_prediction=include_prediction,
+        use_mock_prediction=use_mock_prediction,
+    )
+    model_status = demo_model_status(
+        config,
+        include_prediction=include_prediction,
+        use_mock_prediction=use_mock_prediction,
+        prediction_mode=mode,
+        environ=environ,
+    )
+    if runtime is None:
+        runtime_config = dict(config)
+        if not (mode == "live" and model_status.get("available")):
+            runtime_config["model"] = {
+                **dict(config.get("model", {})),
+                "backend": "none",
+            }
+        runtime = BenchmarkRuntime(runtime_config)
+
+    local_config = dict(config)
+    local_config["experiment"] = {
+        **experiment_config(config),
+        "retrieval_strategy": retrieval_strategy_name,
+        "prompt_variant": prompt_variant_name
+        or demo_config(config).get("prompt_variant")
+        or PromptVariant.STRUCTURED_LEGAL_RAG.value,
+    }
+    local_config["retrieval"] = dict(config.get("retrieval", {}))
+    if top_k is not None:
+        local_config["retrieval"]["top_k"] = int(top_k)
+    resolved_top_k = int(local_config.get("retrieval", {}).get("top_k", 5))
+    effective_prompt_variant = prompt_variant(local_config)
+
+    timings_ms: dict[str, float] = {}
+    retrieval_start = time.perf_counter()
+    evidence, _, diagnostics = retrieve_for_sample(
+        query.model_dump(mode="json", exclude_none=True),
+        local_config,
+        runtime,
+    )
+    timings_ms["retrieval"] = (time.perf_counter() - retrieval_start) * 1000
+
+    prediction: Prediction | Mapping[str, Any] | None = None
+    prediction_source: str | None = None
+    if mode == "mock":
+        generation_start = time.perf_counter()
+        prediction = mock_prediction(query, evidence)
+        timings_ms["generation"] = (time.perf_counter() - generation_start) * 1000
+        prediction_source = "mock_prediction"
+    elif mode == "live" and model_status.get("available"):
+        generation_start = time.perf_counter()
+        try:
+            prediction = runtime.vlm.answer(
+                query,
+                evidence,
+                variant=effective_prompt_variant,
+            )
+            prediction_source = "live_vlm"
+        except Exception as exc:
+            prediction = {
+                "answer": None,
+                "citations": [],
+                "explanation": "Live model call failed; showing retrieval evidence only.",
+                "confidence": 0.0,
+                "abstained": True,
+                "error": {
+                    "type": type(exc).__name__,
+                    "message": str(exc),
+                },
+                "parse": parse_error_metadata(exc),
+            }
+            model_status = {
+                **model_status,
+                "available": False,
+                "reason": f"Live model call failed: {type(exc).__name__}.",
+            }
+            prediction_source = "live_vlm_error"
+        timings_ms["generation"] = (time.perf_counter() - generation_start) * 1000
+
+    return make_demo_inspection_record(
+        sample=query,
+        evidence=evidence,
+        retrieval_strategy_name=retrieval_strategy_name,
+        top_k=resolved_top_k,
+        diagnostics=diagnostics,
+        prediction=prediction,
+        model_status=model_status,
+        timings_ms=timings_ms,
+        prediction_source=prediction_source,
+    )
+
+
 def retrieve_prompt_examples(
     sample: dict[str, Any],
     config: Mapping[str, Any],
