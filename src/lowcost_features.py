@@ -80,6 +80,16 @@ def patch_transformers_tied_weights_compatibility() -> None:
         def keys(self) -> Any:
             return dict.fromkeys(self).keys()
 
+        def items(self) -> list[tuple[str, str]]:
+            return [(str(key), str(key)) for key in self]
+
+        def pop(self, key: str, default: Any = None) -> Any:
+            try:
+                self.remove(key)
+                return key
+            except ValueError:
+                return default
+
     def _get(self: Any) -> _TiedWeightKeys:
         value = self.__dict__.get("_all_tied_weights_keys", [])
         return _TiedWeightKeys(value or [])

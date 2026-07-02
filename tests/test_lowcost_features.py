@@ -277,6 +277,8 @@ def test_transformers_tied_weights_compatibility_patch_allows_assignment():
         instance.all_tied_weights_keys = ["a", "b"]
 
         assert instance.all_tied_weights_keys == ["a", "b"]
+        assert set(instance.all_tied_weights_keys.keys()) == {"a", "b"}
+        assert instance.all_tied_weights_keys.items() == [("a", "a"), ("b", "b")]
     finally:
         if original is None:
             try:
