@@ -76,9 +76,13 @@ def patch_transformers_tied_weights_compatibility() -> None:
     if isinstance(current, property) and current.fset is not None:
         return
 
-    def _get(self: Any) -> list[str]:
+    class _TiedWeightKeys(list):
+        def keys(self) -> list[str]:
+            return list(self)
+
+    def _get(self: Any) -> _TiedWeightKeys:
         value = self.__dict__.get("_all_tied_weights_keys", [])
-        return list(value or [])
+        return _TiedWeightKeys(value or [])
 
     def _set(self: Any, value: Any) -> None:
         self.__dict__["_all_tied_weights_keys"] = list(value or [])
