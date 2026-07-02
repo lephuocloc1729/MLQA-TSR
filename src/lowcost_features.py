@@ -77,8 +77,8 @@ def patch_transformers_tied_weights_compatibility() -> None:
         return
 
     class _TiedWeightKeys(list):
-        def keys(self) -> list[str]:
-            return list(self)
+        def keys(self) -> Any:
+            return dict.fromkeys(self).keys()
 
     def _get(self: Any) -> _TiedWeightKeys:
         value = self.__dict__.get("_all_tied_weights_keys", [])
