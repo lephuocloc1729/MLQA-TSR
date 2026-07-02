@@ -620,7 +620,10 @@ def precompute_text_vectors(
     model_name: str,
     device: str | None,
 ) -> dict[str, list[float]]:
-    text_backend = JinaTextFeatureBackend(model_name, device=device)
+    # Jina remote-code embeddings can produce non-finite CUDA vectors on some
+    # newer GPU/runtime combinations. Text embedding is cheap enough to keep on
+    # CPU while reserving GPU memory for image and object features.
+    text_backend = JinaTextFeatureBackend(model_name, device="cpu")
     vectors: dict[str, list[float]] = {}
     try:
         for sample in samples:
