@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import json
+import math
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
@@ -56,6 +58,14 @@ class ObjectDetectorBackend(Protocol):
 
     def detect(self, image: Image.Image, threshold: float) -> dict[str, list[Any]]:
         ...
+
+
+class PrecomputedTextFeatureBackend:
+    def __init__(self, model_name: str) -> None:
+        self.model_name = model_name
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        raise RuntimeError("Precomputed text backend cannot embed new texts")
 
 
 def patch_transformers_tied_weights_compatibility() -> None:
@@ -142,10 +152,26 @@ class JinaTextFeatureBackend:
             self.model = self.model.to(self.device)
         self.model.eval()
 
+    @staticmethod
+    def _to_float_vectors(outputs: Any) -> list[list[float]]:
+        return [list(map(float, vector)) for vector in outputs]
+
+    @staticmethod
+    def _contains_non_finite(vectors: Sequence[Sequence[float]]) -> bool:
+        return any(not math.isfinite(float(value)) for vector in vectors for value in vector)
+
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         with self.torch.no_grad():
             outputs = self.model.encode(texts)
-        return [list(map(float, vector)) for vector in outputs]
+        vectors = self._to_float_vectors(outputs)
+        if self._contains_non_finite(vectors) and self.device != "cpu":
+            if hasattr(self.model, "to"):
+                self.model = self.model.to("cpu")
+            self.device = "cpu"
+            with self.torch.no_grad():
+                outputs = self.model.encode(texts)
+            vectors = self._to_float_vectors(outputs)
+        return vectors
 
 
 class CRadioImageFeatureBackend:
@@ -485,6 +511,19 @@ def zero_vector(dimension: int) -> list[float]:
     return [0.0] * dimension
 
 
+def require_finite_vector(values: Sequence[float], vector_name: str, sample_id: str) -> list[float]:
+    vector = [float(value) for value in values]
+    bad_index = next(
+        (index for index, value in enumerate(vector) if not math.isfinite(value)),
+        None,
+    )
+    if bad_index is not None:
+        raise ValueError(
+            f"{sample_id}: {vector_name} contains non-finite value at index {bad_index}"
+        )
+    return vector
+
+
 class LowCostFeatureExtractor:
     def __init__(
         self,
@@ -493,12 +532,14 @@ class LowCostFeatureExtractor:
         object_detector: ObjectDetectorBackend,
         object_threshold: float = 0.3,
         image_max_size: int = 1536,
+        precomputed_text_vectors: Mapping[str, list[float]] | None = None,
     ) -> None:
         self.text_backend = text_backend
         self.image_backend = image_backend
         self.object_detector = object_detector
         self.object_threshold = object_threshold
         self.image_max_size = image_max_size
+        self.precomputed_text_vectors = dict(precomputed_text_vectors or {})
 
     @property
     def model_names(self) -> dict[str, str]:
@@ -510,17 +551,32 @@ class LowCostFeatureExtractor:
         }
 
     def extract_one(self, sample: Mapping[str, Any]) -> dict[str, Any]:
+        sample_id = str(sample.get("id") or "<unknown>")
         text_input = format_lowcost_text(sample)
-        text_vector = self.text_backend.embed_texts([text_input])[0]
+        if sample_id in self.precomputed_text_vectors:
+            text_vector = self.precomputed_text_vectors[sample_id]
+        else:
+            text_vector = require_finite_vector(
+                self.text_backend.embed_texts([text_input])[0],
+                "text_vector",
+                sample_id,
+            )
         image = resize_image(load_rgb_image(str(sample["image_path"])), self.image_max_size)
-        image_vector = self.image_backend.embed_images([image])[0]
+        image_vector = require_finite_vector(
+            self.image_backend.embed_images([image])[0],
+            "image_general_feature_vector",
+            sample_id,
+        )
         detections = self.object_detector.detect(image, threshold=self.object_threshold)
         boxes = list(detections.get("boxes", []))
         scores = list(detections.get("scores", []))
         labels = list(detections.get("labels", []))
         crops = crop_objects(image, boxes)
         if crops:
-            object_vectors = self.image_backend.embed_images(crops)
+            object_vectors = [
+                require_finite_vector(vector, "image_object_feature_list_vector", sample_id)
+                for vector in self.image_backend.embed_images(crops)
+            ]
         else:
             object_vectors = [zero_vector(len(image_vector))]
 
@@ -548,9 +604,57 @@ class LowCostFeatureExtractor:
         return row
 
 
-def make_lowcost_extractor(config: Mapping[str, Any]) -> LowCostFeatureExtractor:
+def release_torch_cache() -> None:
+    gc.collect()
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        return
+
+
+def precompute_text_vectors(
+    samples: Sequence[Mapping[str, Any]],
+    model_name: str,
+    device: str | None,
+) -> dict[str, list[float]]:
+    text_backend = JinaTextFeatureBackend(model_name, device=device)
+    vectors: dict[str, list[float]] = {}
+    try:
+        for sample in samples:
+            sample_id = str(sample.get("id") or "<unknown>")
+            text_input = format_lowcost_text(sample)
+            vectors[sample_id] = require_finite_vector(
+                text_backend.embed_texts([text_input])[0],
+                "text_vector",
+                sample_id,
+            )
+    finally:
+        del text_backend
+        release_torch_cache()
+    return vectors
+
+
+def make_lowcost_extractor(
+    config: Mapping[str, Any],
+    samples: Sequence[Mapping[str, Any]] | None = None,
+) -> LowCostFeatureExtractor:
     models = model_config(config)
-    text_backend = JinaTextFeatureBackend(models["text_model"], device=models["device"])
+    precomputed_text_vectors: dict[str, list[float]] = {}
+    if samples is None:
+        text_backend: TextFeatureBackend = JinaTextFeatureBackend(
+            models["text_model"],
+            device=models["device"],
+        )
+    else:
+        precomputed_text_vectors = precompute_text_vectors(
+            samples,
+            models["text_model"],
+            models["device"],
+        )
+        text_backend = PrecomputedTextFeatureBackend(models["text_model"])
     image_backend = CRadioImageFeatureBackend(models["image_model"], device=models["device"])
     object_detector = OwlV2ObjectDetectorBackend(
         models["object_model"],
@@ -563,6 +667,7 @@ def make_lowcost_extractor(config: Mapping[str, Any]) -> LowCostFeatureExtractor
         object_detector=object_detector,
         object_threshold=models["object_threshold"],
         image_max_size=models["image_max_size"],
+        precomputed_text_vectors=precomputed_text_vectors,
     )
 
 
@@ -604,7 +709,7 @@ def run_feature_cache(
     elif output_path.exists() and not resume:
         output_path.unlink()
 
-    extractor = extractor or make_lowcost_extractor(config)
+    extractor = extractor or make_lowcost_extractor(config, samples=samples)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     rows_written = 0
     rows_skipped = 0

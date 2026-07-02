@@ -701,7 +701,10 @@ def retrieve_task1_evidence_for_sample(
     runtime: BenchmarkRuntime,
 ) -> tuple[list[Evidence], list[dict[str, Any]]]:
     article_index = load_processed_law_article_index(dict(config))
-    feature_row = runtime.lowcost_feature_extractor().extract_one(sample)
+    if isinstance(runtime, BenchmarkRuntime):
+        feature_row = make_lowcost_extractor(config, samples=[sample]).extract_one(sample)
+    else:
+        feature_row = runtime.lowcost_feature_extractor().extract_one(sample)
     return retrieve_task1_citation_evidence(
         feature_row,
         config,

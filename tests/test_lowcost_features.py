@@ -5,6 +5,7 @@ import pytest
 from PIL import Image
 
 from src.lowcost_features import (
+    JinaTextFeatureBackend,
     LowCostFeatureExtractor,
     assert_manifest_compatible,
     build_manifest,
@@ -25,6 +26,13 @@ class FakeTextBackend:
 
     def embed_texts(self, texts):
         return [[float(len(text)), 1.0] for text in texts]
+
+
+class FakeNanTextBackend:
+    model_name = "fake-jina-nan"
+
+    def embed_texts(self, texts):
+        return [[float("nan"), 1.0] for _ in texts]
 
 
 class FakeImageBackend:
@@ -52,6 +60,35 @@ class FakeOneBoxDetector:
             "scores": [0.91],
             "labels": ["traffic sign"],
         }
+
+
+class FakeNoGrad:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+class FakeTorch:
+    def no_grad(self):
+        return FakeNoGrad()
+
+
+class FakeRetryTextModel:
+    def __init__(self):
+        self.calls = 0
+        self.device = "cuda"
+
+    def encode(self, texts):
+        self.calls += 1
+        if self.calls == 1:
+            return [[float("nan"), 1.0] for _ in texts]
+        return [[2.0, 1.0] for _ in texts]
+
+    def to(self, device):
+        self.device = device
+        return self
 
 
 def tiny_image(path: Path, size=(4, 3)) -> None:
@@ -177,6 +214,34 @@ def test_empty_object_detection_uses_zero_vector(tmp_path):
     assert row["object_scores"] == []
     assert row["object_labels"] == []
     assert row["image_object_feature_list_vector"] == [[0.0, 0.0, 0.0]]
+
+
+def test_non_finite_vectors_fail_before_cache_write(tmp_path):
+    cfg = base_config(tmp_path)
+    output_dir = tmp_path / "features"
+    extractor = LowCostFeatureExtractor(
+        text_backend=FakeNanTextBackend(),
+        image_backend=FakeImageBackend(),
+        object_detector=FakeEmptyDetector(),
+    )
+
+    with pytest.raises(ValueError, match="text_vector contains non-finite value"):
+        run_feature_cache(cfg, "train", output_dir=output_dir, limit=1, extractor=extractor)
+
+
+def test_jina_text_backend_retries_non_finite_cuda_vectors_on_cpu():
+    backend = object.__new__(JinaTextFeatureBackend)
+    backend.model_name = "fake-jina"
+    backend.torch = FakeTorch()
+    backend.device = "cuda"
+    backend.model = FakeRetryTextModel()
+
+    vectors = backend.embed_texts(["Question: test"])
+
+    assert vectors == [[2.0, 1.0]]
+    assert backend.device == "cpu"
+    assert backend.model.device == "cpu"
+    assert backend.model.calls == 2
 
 
 def test_test_feature_loading_does_not_require_gold_labels(tmp_path):
