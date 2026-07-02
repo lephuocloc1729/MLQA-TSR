@@ -147,7 +147,16 @@ class JinaTextFeatureBackend:
         self.torch = torch
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         patch_transformers_tied_weights_compatibility()
-        self.model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
+        try:
+            self.model = AutoModel.from_pretrained(
+                model_name,
+                trust_remote_code=True,
+                dtype=torch.float32,
+            )
+        except TypeError:
+            self.model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
+        if hasattr(self.model, "float"):
+            self.model = self.model.float()
         if hasattr(self.model, "to"):
             self.model = self.model.to(self.device)
         self.model.eval()
