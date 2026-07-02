@@ -10,7 +10,9 @@ from uuid import NAMESPACE_URL, uuid5
 from qdrant_client import QdrantClient, models
 
 from src.evaluate import mean, score_retrieval_sample
+from src.data_utils import resolve_law_reference
 from src.lowcost_features import manifest_output_path
+from src.schemas import Evidence, RetrievalMethod
 from src.utils import (
     load_config,
     read_json,
@@ -36,6 +38,7 @@ TASK1_DEFAULT_LIMITS = {
     "image_limit": 5,
     "object_limit": 3,
 }
+TASK1_EVIDENCE_SCHEMA_VERSION = "lowcost-task1-evidence-v1"
 
 
 class LowCostVectorStore(Protocol):
@@ -610,6 +613,112 @@ def task1_prediction_row(
         "question": question,
         "relevant_articles": citations,
     }
+
+
+def task1_evidence_from_citations(
+    citations: Sequence[Mapping[str, Any]],
+    article_index: Mapping[str, dict],
+    retrieved_examples: Sequence[Mapping[str, Any] | Any] | None = None,
+    base_score: float = 1.0,
+) -> tuple[list[Evidence], list[dict[str, Any]]]:
+    """Resolve Task 1 citations into prompt-ready LawDB evidence."""
+    evidence: list[Evidence] = []
+    diagnostics: list[dict[str, Any]] = []
+    sources = [
+        {
+            "sample_id": retrieved_payload(item).get("sample_id")
+            or retrieved_payload(item).get("id"),
+            "image_id": retrieved_payload(item).get("image_id"),
+            "score": item.get("score") if isinstance(item, Mapping) else getattr(item, "score", None),
+        }
+        for item in (retrieved_examples or [])
+    ]
+    seen: set[str] = set()
+
+    for citation in citations:
+        sample_id = "lowcost_task1"
+        item = normalize_output_citation(citation, sample_id)
+        try:
+            article = resolve_law_reference(item, article_index)
+        except KeyError as exc:
+            diagnostics.append(
+                {
+                    "type": "unknown_task1_citation",
+                    "law_id": item["law_id"],
+                    "article_id": item["article_id"],
+                    "reason": str(exc),
+                }
+            )
+            continue
+        uid = str(article["uid"])
+        if uid in seen:
+            continue
+        seen.add(uid)
+        rank = len(evidence) + 1
+        evidence.append(
+            Evidence(
+                law_id=str(article["law_id"]),
+                article_id=str(article["article_id"]),
+                title=str(article.get("title") or ""),
+                content=str(article["content"]),
+                score=max(0.0, float(base_score) - (rank - 1) * 0.01),
+                rank=rank,
+                retrieval_method=RetrievalMethod.EXAMPLE,
+                metadata={
+                    "schema_version": TASK1_EVIDENCE_SCHEMA_VERSION,
+                    "source": "lowcost_task1_retrieved_examples",
+                    "law_title": article.get("law_title"),
+                    "images": article.get("images", []),
+                    "tables": article.get("tables", []),
+                    "retrieved_examples": sources,
+                },
+            )
+        )
+    return evidence, diagnostics
+
+
+def retrieve_task1_citation_evidence(
+    query_row: Mapping[str, Any],
+    config: Mapping[str, Any],
+    article_index: Mapping[str, dict],
+    vector_store: LowCostVectorStore | None = None,
+) -> tuple[list[Evidence], list[dict[str, Any]]]:
+    """Run low-cost Task 1 retrieval and return LawDB evidence for a query row."""
+    query_mode = lowcost_task1_query_mode(config)
+    dimensions = dimensions_from_config(config) or vector_dimensions_from_row(query_row)
+    missing = [
+        key
+        for key in (TEXT_VECTOR_NAME, IMAGE_VECTOR_NAME, OBJECT_DIMENSION_NAME)
+        if not dimensions.get(key)
+    ]
+    if missing:
+        raise ValueError(f"Task 1 evidence retrieval is missing dimensions: {missing}")
+
+    limits = lowcost_task1_limits(config)
+    vector_store = vector_store or make_lowcost_vector_store(config)
+    query_vectors = query_vectors_from_feature_row(query_row, dimensions, query_mode)
+    retrieved_examples = vector_store.query_task1(query_vectors, limits, query_mode)
+    citations = union_relevant_articles_from_examples(
+        retrieved_examples,
+        max_articles=limits["max_articles"],
+    )
+    evidence, diagnostics = task1_evidence_from_citations(
+        citations,
+        article_index=article_index,
+        retrieved_examples=retrieved_examples,
+    )
+    diagnostics.append(
+        {
+            "type": "lowcost_task1_retrieval",
+            "collection": vector_store.collection_name,
+            "query_mode": query_mode,
+            "limits": limits,
+            "retrieved_example_count": len(retrieved_examples),
+            "citation_count": len(citations),
+            "evidence_count": len(evidence),
+        }
+    )
+    return evidence, diagnostics
 
 
 def run_lowcost_task1_predictions(

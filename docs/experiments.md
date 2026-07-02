@@ -745,6 +745,40 @@ the zip contains exactly `submission_task1.json` and `submission_task2.json`,
 and prints a ledger-ready row with the SHA256 hash. Copy that row into
 `docs/vlsp-postsubmission-log.md` before uploading to Codabench.
 
+## Free-Form QA Evaluation Set
+
+Free-form QA is evaluated separately from VLSP Task 2 exact-match labels. The
+project now builds `data/processed/freeform_val.jsonl` from the locked
+validation split:
+
+```bash
+make freeform-val
+```
+
+Each row contains:
+
+- `question`: a natural-language/free-form version of the original VLSP
+  validation question;
+- `expected_citations`: gold LawDB references from `relevant_articles`;
+- `expected_answer`: a short target conclusion derived from the original
+  answer or choice text;
+- `target`: a `Prediction`-compatible object for parser/prompt checks;
+- `source`: original question type, question, choices, and answer.
+
+For product QA, use demo retrieval strategy `hybrid` when the low-cost Task 1
+index is available:
+
+```text
+uploaded image + free-form question
+  -> direct LawDB text retrieval
+  -> low-cost Task 1 train-example citation retrieval
+  -> resolve citations to LawDB article content
+  -> VLM structured free-form answer with citations
+```
+
+This lets later GPU runs compare Task 1 retraining and VLM prompting/training
+against the same free-form validation set.
+
 ## Final Defense Reproducibility Pack
 
 Use this checklist before copying any number into the final report or slides.

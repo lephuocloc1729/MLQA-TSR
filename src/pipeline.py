@@ -7,8 +7,18 @@ import time
 from pathlib import Path
 from typing import Any, Mapping
 
-from src.data_utils import load_split_samples, load_vlsp_test_samples
+from src.data_utils import (
+    load_processed_law_article_index,
+    load_split_samples,
+    load_vlsp_test_samples,
+)
 from src.evaluate import extract_sample_id, read_prediction_jsonl
+from src.lowcost_features import LowCostFeatureExtractor, make_lowcost_extractor
+from src.lowcost_retrieval import (
+    LowCostVectorStore,
+    make_lowcost_vector_store,
+    retrieve_task1_citation_evidence,
+)
 from src.prompts import PromptVariant, normalize_prompt_variant
 from src.retrieval import (
     ImageEmbedder,
@@ -50,6 +60,8 @@ class BenchmarkRuntime:
         self._law_vector_store: TextVectorStore | None = None
         self._example_vector_store: ExampleVectorStore | None = None
         self._image_embedder: ImageEmbedder | None = None
+        self._lowcost_feature_extractor: LowCostFeatureExtractor | None = None
+        self._lowcost_vector_store: LowCostVectorStore | None = None
 
     def text_embedder(self) -> TextEmbedder:
         if self._text_embedder is None:
@@ -70,6 +82,16 @@ class BenchmarkRuntime:
         if self._image_embedder is None:
             self._image_embedder = make_image_embedder_from_config(self.config)
         return self._image_embedder
+
+    def lowcost_feature_extractor(self) -> LowCostFeatureExtractor:
+        if self._lowcost_feature_extractor is None:
+            self._lowcost_feature_extractor = make_lowcost_extractor(self.config)
+        return self._lowcost_feature_extractor
+
+    def lowcost_vector_store(self) -> LowCostVectorStore:
+        if self._lowcost_vector_store is None:
+            self._lowcost_vector_store = make_lowcost_vector_store(self.config)
+        return self._lowcost_vector_store
 
 
 def experiment_config(config: Mapping[str, Any]) -> dict[str, Any]:
@@ -199,7 +221,7 @@ def load_demo_sample_by_id(
 def retrieval_strategy(config: Mapping[str, Any]) -> str:
     experiment = experiment_config(config)
     strategy = str(experiment.get("retrieval_strategy", "text")).strip().lower()
-    allowed = {"none", "text", "fusion"}
+    allowed = {"none", "text", "fusion", "task1", "hybrid"}
     if strategy not in allowed:
         raise ValueError(f"retrieval_strategy must be one of {sorted(allowed)}")
     return strategy
@@ -654,6 +676,40 @@ def disable_model_backend(config: Mapping[str, Any]) -> dict[str, Any]:
     return local_config
 
 
+def merge_evidence(
+    *groups: list[Evidence],
+    top_k: int,
+) -> list[Evidence]:
+    merged: list[Evidence] = []
+    seen: set[str] = set()
+    for group in groups:
+        for item in group:
+            if item.uid in seen:
+                continue
+            data = item.model_dump(mode="json")
+            data["rank"] = len(merged) + 1
+            merged.append(Evidence.model_validate(data))
+            seen.add(item.uid)
+            if len(merged) >= top_k:
+                return merged
+    return merged
+
+
+def retrieve_task1_evidence_for_sample(
+    sample: dict[str, Any],
+    config: Mapping[str, Any],
+    runtime: BenchmarkRuntime,
+) -> tuple[list[Evidence], list[dict[str, Any]]]:
+    article_index = load_processed_law_article_index(dict(config))
+    feature_row = runtime.lowcost_feature_extractor().extract_one(sample)
+    return retrieve_task1_citation_evidence(
+        feature_row,
+        config,
+        article_index=article_index,
+        vector_store=runtime.lowcost_vector_store(),
+    )
+
+
 def retrieve_for_sample(
     sample: dict[str, Any],
     config: Mapping[str, Any],
@@ -672,6 +728,44 @@ def retrieve_for_sample(
             vector_store=runtime.law_vector_store(),
             top_k=top_k,
         ), [], []
+
+    if strategy in {"task1", "hybrid"}:
+        diagnostics: list[dict[str, Any]] = []
+        direct_evidence: list[Evidence] = []
+        task1_evidence: list[Evidence] = []
+
+        if strategy == "hybrid":
+            direct_evidence = retrieve_evidence(
+                sample,
+                dict(config),
+                embedder=runtime.text_embedder(),
+                vector_store=runtime.law_vector_store(),
+                top_k=top_k,
+            )
+
+        try:
+            task1_evidence, task1_diagnostics = retrieve_task1_evidence_for_sample(
+                sample,
+                config,
+                runtime,
+            )
+            diagnostics.extend(task1_diagnostics)
+        except Exception as exc:
+            if not bool(config.get("retrieval", {}).get("task1_allow_failure", True)):
+                raise
+            diagnostics.append(
+                {
+                    "type": "lowcost_task1_retrieval_failed",
+                    "reason": str(exc),
+                    "strategy": strategy,
+                }
+            )
+
+        return merge_evidence(
+            direct_evidence,
+            task1_evidence,
+            top_k=top_k,
+        ), [], diagnostics
 
     retrieval_config = config.get("retrieval", {})
     example_top_k = int(retrieval_config.get("example_top_k", 3))

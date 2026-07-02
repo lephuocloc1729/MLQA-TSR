@@ -1,4 +1,4 @@
-.PHONY: help setup check-data check-data-all qdrant-up qdrant-down preprocess index index-examples index-week2 retrieve benchmark-b2 benchmark-b3 benchmark-b4 benchmark-week2-smoke benchmark-w3-real adapter-diagnostic qlora-dry-run qlora-smoke20 lowcost-task1-gpu task1 task2 assistant eval demo ci-test test verify release-check clean
+.PHONY: help setup check-data check-data-all qdrant-up qdrant-down preprocess freeform-val index index-examples index-week2 retrieve benchmark-b2 benchmark-b3 benchmark-b4 benchmark-week2-smoke benchmark-w3-real adapter-diagnostic qlora-dry-run qlora-smoke20 lowcost-task1-gpu task1 task2 assistant eval demo ci-test test verify release-check clean
 
 SMOKE_LIMIT ?= 5
 PYTHON_BIN := $(if $(PYTHON),$(PYTHON),$(if $(wildcard .venv/bin/python),.venv/bin/python,python))
@@ -19,6 +19,7 @@ help:
 	@echo ""
 	@echo "Pipeline:"
 	@echo "  make preprocess       Build processed LawDB articles"
+	@echo "  make freeform-val     Build free-form validation JSONL from locked val split"
 	@echo "  make index            Build the LawDB text retrieval index"
 	@echo "  make index-examples   Build the week-2 train-example index"
 	@echo "  make index-week2      Build both week-2 retrieval indexes"
@@ -51,6 +52,9 @@ qdrant-down:
 
 preprocess:
 	$(PYTHON_BIN) -m src.data_utils --mode preprocess
+
+freeform-val:
+	$(PYTHON_BIN) -m src.data_utils --mode build-freeform-val
 
 index:
 	bash scripts/index.sh law

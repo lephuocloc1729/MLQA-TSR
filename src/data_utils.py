@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from src.prompts import PromptVariant, build_legal_qa_prompt
-from src.schemas import Evidence, PipelineResult, Prediction, Query, RetrievalMethod
+from src.schemas import Evidence, PipelineResult, Prediction, Query, QuestionType, RetrievalMethod
 from src.utils import load_config, read_json, read_jsonl, write_json, write_jsonl
 
 
@@ -23,6 +23,8 @@ ROAD_TRAFFIC_LAW_ID = "36/2024/QH15"
 DEFAULT_VALIDATION_RATIO = 0.2
 DEFAULT_SFT_TRAIN_PATH = "data/processed/sft_train.jsonl"
 DEFAULT_SFT_VAL_PATH = "data/processed/sft_val.jsonl"
+DEFAULT_FREEFORM_VAL_PATH = "data/processed/freeform_val.jsonl"
+FREEFORM_VAL_SCHEMA_VERSION = "freeform-val-v1"
 
 
 ARTICLE_REFERENCE_ALIASES: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {
@@ -879,6 +881,150 @@ def build_sft_datasets(config: dict) -> dict[str, Any]:
     return summary
 
 
+def freeform_val_output_path(config: Mapping[str, Any]) -> str:
+    data_config = config.get("data", {})
+    freeform = config.get("freeform", {}) if isinstance(config.get("freeform"), Mapping) else {}
+    return str(
+        freeform.get("val_output_path")
+        or data_config.get("freeform_val_path")
+        or DEFAULT_FREEFORM_VAL_PATH
+    )
+
+
+def freeform_question_from_sample(sample: Mapping[str, Any]) -> str:
+    question = str(sample.get("question") or "").strip()
+    question_type = str(sample.get("question_type") or "").strip()
+    if question_type == "Multiple choice":
+        return (
+            "Dựa vào ảnh và quy định giao thông, hãy trả lời bằng một đoạn "
+            "văn ngắn, không chỉ chọn A/B/C/D: "
+            + question
+        )
+    if question_type == "Yes/No":
+        return (
+            "Dựa vào ảnh và quy định giao thông, hãy cho biết nhận định sau "
+            "đúng hay sai và giải thích ngắn gọn: "
+            + question
+        )
+    return question
+
+
+def freeform_expected_answer(sample: Mapping[str, Any]) -> str:
+    question_type = str(sample.get("question_type") or "").strip()
+    answer = str(sample.get("answer") or "").strip()
+    if question_type == "Multiple choice":
+        choices = sample.get("choices") or {}
+        answer_text = str(choices.get(answer) or "").strip()
+        if answer_text:
+            return f"Kết luận: {answer_text}."
+        return f"Kết luận tương ứng với lựa chọn {answer}."
+    if question_type == "Yes/No":
+        return f"Kết luận: {answer}."
+    return answer or "Không đủ dữ liệu nhãn để tạo câu trả lời tham chiếu."
+
+
+def freeform_tags_from_sample(sample: Mapping[str, Any]) -> list[str]:
+    tags = ["vlsp_validation", "freeform_eval"]
+    question_type = str(sample.get("question_type") or "").strip()
+    if question_type:
+        tags.append(question_type.casefold().replace("/", "_").replace(" ", "_"))
+    question = str(sample.get("question") or "").casefold()
+    keyword_tags = {
+        "parking": ["đỗ", "dừng"],
+        "prohibition": ["cấm"],
+        "lane": ["làn"],
+        "direction": ["rẽ", "đi thẳng", "quay đầu"],
+        "time": ["thời gian", "khung giờ", "giờ"],
+        "sign_identification": ["biển báo", "biển"],
+    }
+    for tag, keywords in keyword_tags.items():
+        if any(keyword in question for keyword in keywords):
+            tags.append(tag)
+    return sorted(set(tags))
+
+
+def build_freeform_val_record(
+    sample: Mapping[str, Any],
+    article_index: Mapping[str, dict],
+    index: int,
+) -> dict[str, Any]:
+    query = Query.model_validate(sample)
+    evidence = build_oracle_evidence(sample, article_index)
+    citations = [
+        {"law_id": item.law_id, "article_id": item.article_id}
+        for item in evidence
+    ]
+    expected_answer = freeform_expected_answer(sample)
+    explanation = (
+        "Câu trả lời cần dựa trên ảnh, câu hỏi và các căn cứ pháp lý vàng: "
+        + ", ".join(item.uid for item in evidence)
+        if evidence
+        else "Không có căn cứ pháp lý vàng trong mẫu validation."
+    )
+    target = {
+        "answer": expected_answer,
+        "citations": citations,
+        "explanation": explanation,
+        "confidence": 1.0 if citations else 0.0,
+        "abstained": not bool(citations),
+    }
+    return {
+        "schema_version": FREEFORM_VAL_SCHEMA_VERSION,
+        "id": f"freeform_val_{index:04d}",
+        "source_id": query.id,
+        "image_id": query.image_id,
+        "image_path": query.image_path,
+        "question_type": QuestionType.FREE_FORM.value,
+        "question": freeform_question_from_sample(sample),
+        "expected_answer": expected_answer,
+        "expected_citations": citations,
+        "expected_abstained": target["abstained"],
+        "target": target,
+        "source": {
+            "question_type": query.question_type.value if query.question_type else None,
+            "question": query.question,
+            "choices": query.choices,
+            "answer": query.answer,
+        },
+        "tags": freeform_tags_from_sample(sample),
+    }
+
+
+def build_freeform_validation_dataset(config: dict) -> dict[str, Any]:
+    val_path = Path(config["data"]["val_split_path"])
+    processed_law_path = Path(config["data"]["processed_law_path"])
+    if not val_path.exists():
+        raise FileNotFoundError(
+            f"Validation split not found at {val_path}. "
+            "Run `python -m src.data_utils --mode split` first."
+        )
+    if not processed_law_path.exists():
+        raise FileNotFoundError(
+            f"Processed LawDB not found at {processed_law_path}. "
+            "Run `python -m src.data_utils --mode preprocess` first."
+        )
+
+    article_index = build_law_article_index(load_law_articles(processed_law_path))
+    samples = read_jsonl(str(val_path))
+    records = [
+        build_freeform_val_record(sample, article_index, index=index)
+        for index, sample in enumerate(samples, start=1)
+    ]
+    output_path = freeform_val_output_path(config)
+    write_jsonl(records, output_path)
+    summary = {
+        "schema_version": FREEFORM_VAL_SCHEMA_VERSION,
+        "output_path": output_path,
+        "record_count": len(records),
+        "source_val_path": str(val_path),
+        "processed_law_path": str(processed_law_path),
+        "citation_count": sum(len(record["expected_citations"]) for record in records),
+        "abstained_count": sum(1 for record in records if record["expected_abstained"]),
+    }
+    print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+    return summary
+
+
 def build_law_articles(config: dict) -> list[dict]:
     law_path = config["data"]["law_path"]
     output_path = config["data"]["processed_law_path"]
@@ -914,6 +1060,8 @@ def main():
         validate_data(config)
     elif args.mode == "build-sft":
         build_sft_datasets(config)
+    elif args.mode == "build-freeform-val":
+        build_freeform_validation_dataset(config)
     else:
         raise ValueError(f"Unknown mode: {args.mode}")
 

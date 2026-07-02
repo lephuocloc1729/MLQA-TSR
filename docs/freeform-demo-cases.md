@@ -7,9 +7,12 @@ for live demonstration and qualitative inspection, not benchmark scoring.
 
 1. Start in retrieval-only mode to show the uploaded image, question, and
    retrieved legal evidence.
-2. If a live VLM endpoint is available, switch to live mode and show that the
+2. Use `hybrid` retrieval when the low-cost Task 1 train-example index is
+   available. This combines direct LawDB text evidence with citations copied
+   from similar solved training examples.
+3. If a live VLM endpoint is available, switch to live mode and show that the
    answer cites only retrieved articles.
-3. If the answer is uncertain, emphasize abstention and the research
+4. If the answer is uncertain, emphasize abstention and the research
    disclaimer instead of forcing a legal conclusion.
 
 ## Suggested Questions
@@ -28,7 +31,22 @@ for live demonstration and qualitative inspection, not benchmark scoring.
 ## Expected Demo Behavior
 
 - Retrieval-only mode must work without GPU or API credentials.
+- `task1`/`hybrid` retrieval requires the low-cost train-example Qdrant index;
+  if it is unavailable, the demo should show diagnostics rather than hiding the
+  failure.
 - Live mode should answer in Vietnamese, lead with a concise conclusion, cite
   retrieved articles, and avoid official-legal-advice wording.
 - If retrieved evidence is weak or the uploaded image is ambiguous, the model
   should abstain instead of guessing.
+
+## Evaluation Dataset
+
+Rebuild the free-form validation set from the locked validation split with:
+
+```bash
+make freeform-val
+```
+
+The output is `data/processed/freeform_val.jsonl`. Each row keeps the original
+VLSP validation image, a free-form version of the question, expected citations,
+and a short target answer for later retrieval/VLM evaluation.

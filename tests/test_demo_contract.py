@@ -42,12 +42,69 @@ def evidence(article_id: str = "22") -> Evidence:
     )
 
 
+def law_article(article_id: str = "22") -> dict:
+    return {
+        "uid": f"{LAW_ID}#{article_id}",
+        "law_id": LAW_ID,
+        "law_title": "Quy chuẩn báo hiệu đường bộ",
+        "article_id": article_id,
+        "title": f"Điều {article_id}",
+        "content": f"Nội dung pháp lý của Điều {article_id}.",
+        "images": [],
+        "tables": [],
+    }
+
+
 def write_jsonl(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
         encoding="utf-8",
     )
+
+
+class FakeLowCostExtractor:
+    def extract_one(self, sample):
+        return {
+            "id": sample["id"],
+            "sample_id": sample["id"],
+            "image_id": sample["image_id"],
+            "image_path": sample["image_path"],
+            "question": sample["question"],
+            "question_type": sample.get("question_type"),
+            "choices": sample.get("choices", {}),
+            "text_vector": [0.1, 0.2],
+            "image_general_feature_vector": [0.3, 0.4, 0.5],
+            "image_object_feature_list_vector": [[0.6, 0.7, 0.8]],
+        }
+
+
+class FakeLowCostVectorStore:
+    collection_name = "traffic_train_examples_lowcost"
+    uses_multivector = True
+
+    def query_task1(self, query_vectors, limits, query_mode):
+        return [
+            {
+                "score": 0.91,
+                "payload": {
+                    "sample_id": "train_1",
+                    "image_id": "train_1_1",
+                    "split": "train",
+                    "relevant_articles": [
+                        {"law_id": LAW_ID, "article_id": "B.13"}
+                    ],
+                },
+            }
+        ]
+
+
+class FakeTask1Runtime:
+    def lowcost_feature_extractor(self):
+        return FakeLowCostExtractor()
+
+    def lowcost_vector_store(self):
+        return FakeLowCostVectorStore()
 
 
 def test_demo_inspection_record_contract_is_ui_ready_without_raw_path_leakage():
@@ -152,6 +209,46 @@ def test_build_freeform_demo_retrieval_only_uses_uploaded_image_without_choices(
     assert record["local_image_path"] == str(image_path)
     assert record["retrieval"]["strategy"] == "none"
     assert record["prediction"] is None
+
+
+def test_build_freeform_demo_can_use_task1_retrieved_citations(tmp_path):
+    image_path = tmp_path / "uploaded.jpg"
+    image_path.write_bytes(b"not-a-real-image-but-path-exists")
+    processed_law_path = tmp_path / "law_articles.jsonl"
+    write_jsonl(processed_law_path, [law_article("B.13")])
+    config = {
+        "data": {"processed_law_path": str(processed_law_path)},
+        "retrieval": {"top_k": 5},
+        "lowcost_retrieval": {
+            "dimensions": {
+                "text_vector": 2,
+                "image_general_feature_vector": 3,
+                "image_object_feature_vector": 3,
+            }
+        },
+        "lowcost_task1": {
+            "query_mode": "text_image_object",
+            "text_limit": 10,
+            "image_limit": 5,
+            "object_limit": 3,
+        },
+        "model": {"name": "mock-vlm"},
+    }
+
+    record = build_freeform_demo_inspection(
+        image_path=image_path,
+        question="Biển báo này có ý nghĩa gì?",
+        config=config,
+        top_k=3,
+        retrieval_strategy_name="task1",
+        prediction_mode="retrieval_only",
+        runtime=FakeTask1Runtime(),
+    )
+
+    assert record["retrieval"]["strategy"] == "task1"
+    assert record["retrieval"]["citation_ids"] == [f"{LAW_ID}#B.13"]
+    assert record["retrieval"]["evidence"][0]["retrieval_method"] == "example"
+    assert record["retrieval"]["diagnostics"][-1]["type"] == "lowcost_task1_retrieval"
 
 
 def test_build_freeform_demo_mock_answer_is_marked_as_freeform(tmp_path):

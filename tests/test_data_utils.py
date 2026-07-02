@@ -4,11 +4,15 @@ from pathlib import Path
 import pytest
 
 from src.data_utils import (
+    build_freeform_val_record,
+    build_freeform_validation_dataset,
     build_law_article_index,
     build_law_articles,
     clean_html,
     extract_images,
     extract_tables,
+    freeform_expected_answer,
+    freeform_question_from_sample,
     get_law_article,
     iter_law_articles,
     load_law_articles,
@@ -134,6 +138,97 @@ def test_build_law_articles_writes_expected_jsonl_shape(tmp_path):
     assert articles == rows
     assert rows[0]["content"] == "Nội dung quan trọng"
     assert "raw" not in rows[0]
+
+
+def test_freeform_question_and_expected_answer_from_multiple_choice():
+    sample = {
+        "question": "Đây là biển báo gì?",
+        "question_type": "Multiple choice",
+        "choices": {"A": "Biển cấm", "B": "Biển nguy hiểm", "C": "Biển hiệu lệnh", "D": "Biển chỉ dẫn"},
+        "answer": "B",
+    }
+
+    assert "không chỉ chọn A/B/C/D" in freeform_question_from_sample(sample)
+    assert freeform_expected_answer(sample) == "Kết luận: Biển nguy hiểm."
+
+
+def test_build_freeform_val_record_contains_gold_citations_and_target():
+    article = {
+        "uid": "QCVN 41:2024/BGTVT#22",
+        "law_id": "QCVN 41:2024/BGTVT",
+        "law_title": "Quy chuẩn",
+        "article_id": "22",
+        "title": "Điều 22",
+        "content": "Nội dung điều 22",
+        "images": [],
+        "tables": [],
+    }
+    sample = {
+        "id": "val_1",
+        "image_id": "img_1",
+        "image_path": "data/raw/train_data/train_images/img_1.jpg",
+        "question": "Biển báo này có ý nghĩa gì?",
+        "question_type": "Yes/No",
+        "answer": "Đúng",
+        "relevant_articles": [{"law_id": "QCVN 41:2024/BGTVT", "article_id": "22"}],
+    }
+
+    record = build_freeform_val_record(sample, build_law_article_index([article]), index=1)
+
+    assert record["id"] == "freeform_val_0001"
+    assert record["source_id"] == "val_1"
+    assert record["question_type"] == "Free-form"
+    assert record["expected_answer"] == "Kết luận: Đúng."
+    assert record["expected_citations"] == [
+        {"law_id": "QCVN 41:2024/BGTVT", "article_id": "22"}
+    ]
+    assert record["target"]["citations"] == record["expected_citations"]
+
+
+def test_build_freeform_validation_dataset_writes_jsonl(tmp_path):
+    processed_law_path = tmp_path / "law_articles.jsonl"
+    val_split_path = tmp_path / "val_split.jsonl"
+    output_path = tmp_path / "freeform_val.jsonl"
+    article = {
+        "uid": "QCVN 41:2024/BGTVT#22",
+        "law_id": "QCVN 41:2024/BGTVT",
+        "law_title": "Quy chuẩn",
+        "article_id": "22",
+        "title": "Điều 22",
+        "content": "Nội dung điều 22",
+        "images": [],
+        "tables": [],
+    }
+    sample = {
+        "id": "val_1",
+        "image_id": "img_1",
+        "image_path": "data/raw/train_data/train_images/img_1.jpg",
+        "question": "Đây là biển báo gì?",
+        "question_type": "Multiple choice",
+        "choices": {"A": "Một", "B": "Hai", "C": "Ba", "D": "Bốn"},
+        "answer": "B",
+        "relevant_articles": [{"law_id": "QCVN 41:2024/BGTVT", "article_id": "22"}],
+    }
+    processed_law_path.write_text(json.dumps(article, ensure_ascii=False) + "\n", encoding="utf-8")
+    val_split_path.write_text(json.dumps(sample, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    summary = build_freeform_validation_dataset(
+        {
+            "data": {
+                "val_split_path": str(val_split_path),
+                "processed_law_path": str(processed_law_path),
+                "freeform_val_path": str(output_path),
+            }
+        }
+    )
+
+    rows = [
+        json.loads(line)
+        for line in output_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert summary["record_count"] == 1
+    assert rows[0]["target"]["answer"] == "Kết luận: Hai."
 
 
 @pytest.mark.skipif(not REAL_LAWDB_PATH.exists(), reason="Local VLSP LawDB is unavailable")

@@ -6,8 +6,10 @@ from src.lowcost_retrieval import (
     OBJECT_VECTOR_NAME,
     TEXT_VECTOR_NAME,
     lowcost_task1_limits,
+    retrieve_task1_citation_evidence,
     run_lowcost_task1_predictions,
     summarize_task1_ablation,
+    task1_evidence_from_citations,
     task1_prediction_row,
     union_relevant_articles_from_examples,
 )
@@ -98,6 +100,31 @@ def retrieved_example(sample_id: str, citations: list[dict[str, str]]) -> dict:
     }
 
 
+def article_index() -> dict:
+    return {
+        f"{LAW_ID}#22": {
+            "uid": f"{LAW_ID}#22",
+            "law_id": LAW_ID,
+            "law_title": "Quy chuẩn báo hiệu đường bộ",
+            "article_id": "22",
+            "title": "Điều 22",
+            "content": "Nội dung Điều 22.",
+            "images": [],
+            "tables": [],
+        },
+        f"{LAW_ID}#B.13": {
+            "uid": f"{LAW_ID}#B.13",
+            "law_id": LAW_ID,
+            "law_title": "Quy chuẩn báo hiệu đường bộ",
+            "article_id": "B.13",
+            "title": "Biển B.13",
+            "content": "Nội dung biển B.13.",
+            "images": [],
+            "tables": [],
+        },
+    }
+
+
 def write_feature_files(tmp_path: Path, rows=None, set_name="public_test") -> Path:
     rows = rows or [query_feature_row()]
     features_path = tmp_path / f"{set_name}_features.jsonl"
@@ -167,6 +194,43 @@ def test_task1_output_row_never_contains_answer():
         "relevant_articles": [{"law_id": LAW_ID, "article_id": "22"}],
     }
     assert "answer" not in row
+
+
+def test_task1_citations_resolve_to_prompt_ready_evidence():
+    evidence, diagnostics = task1_evidence_from_citations(
+        [{"law_id": LAW_ID, "article_id": "22"}],
+        article_index(),
+        retrieved_examples=[
+            retrieved_example("train_1", [{"law_id": LAW_ID, "article_id": "22"}])
+        ],
+    )
+
+    assert diagnostics == []
+    assert evidence[0].uid == f"{LAW_ID}#22"
+    assert evidence[0].content == "Nội dung Điều 22."
+    assert evidence[0].retrieval_method == "example"
+    assert evidence[0].metadata["source"] == "lowcost_task1_retrieved_examples"
+
+
+def test_task1_evidence_retrieval_queries_examples_and_resolves_articles():
+    store = FakeTask1VectorStore(
+        [
+            retrieved_example("train_1", [{"law_id": LAW_ID, "article_id": "22"}]),
+            retrieved_example("train_2", [{"law_id": LAW_ID, "article_id": "B.13"}]),
+        ]
+    )
+
+    evidence, diagnostics = retrieve_task1_citation_evidence(
+        query_feature_row(),
+        config(),
+        article_index(),
+        vector_store=store,
+    )
+
+    assert [item.uid for item in evidence] == [f"{LAW_ID}#22", f"{LAW_ID}#B.13"]
+    assert store.calls[0]["query_mode"] == "text_image_object"
+    assert diagnostics[-1]["type"] == "lowcost_task1_retrieval"
+    assert diagnostics[-1]["citation_count"] == 2
 
 
 def test_task1_runner_passes_configurable_limits_and_writes_packager_shape(tmp_path):

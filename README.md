@@ -110,6 +110,7 @@ Prepare local data and indexes:
 make qdrant-up
 python -m src.data_utils --mode preprocess
 python -m src.data_utils --mode split
+make freeform-val
 python -m src.retrieval --mode index
 ```
 
@@ -130,6 +131,8 @@ The app supports:
 
 - image upload plus free-form question input;
 - retrieval-only evidence inspection without GPU/API credentials;
+- `hybrid` retrieval, combining LawDB text retrieval with Task 1 train-example
+  citation retrieval when the low-cost index is available;
 - optional live VLM answering when backend credentials are configured;
 - mock smoke mode for checking UI behavior without reporting model quality;
 - visible citations, evidence scores, answer, explanation, latency, and a
@@ -139,6 +142,8 @@ Uploaded images are stored under ignored local output storage
 `data/outputs/demo_uploads/`. If no live VLM backend is configured, the demo
 stays in retrieval-only mode and shows a clear message. Suggested presentation
 questions are in [`docs/freeform-demo-cases.md`](docs/freeform-demo-cases.md).
+The free-form validation set for later retrieval/VLM evaluation is
+`data/processed/freeform_val.jsonl`.
 
 ## Week 2 Retrieval And Few-Shot Release
 

@@ -190,9 +190,12 @@ def main() -> None:
         config_path = st.text_input("Config path", DEFAULT_CONFIG_PATH)
         retrieval_strategy = st.selectbox(
             "Retrieval strategy",
-            ["text", "fusion", "none"],
+            ["hybrid", "text", "task1", "fusion", "none"],
             index=0,
-            help="Fusion also uses similar train examples if the example index exists.",
+            help=(
+                "Hybrid combines LawDB text retrieval with Task 1 citation "
+                "retrieval. Task1 requires the low-cost train-example index."
+            ),
         )
         top_k = st.slider("Top-k legal evidence", 1, 10, 5)
         mode_label = st.selectbox(

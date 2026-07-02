@@ -23,6 +23,7 @@ data:
   val_split_path: data/processed/val_split.jsonl
   split_manifest_path: data/processed/split_manifest.json
   regression_path: data/processed/regression_set.json
+  freeform_val_path: data/processed/freeform_val.jsonl
 
 split:
   validation_ratio: 0.2
@@ -43,6 +44,7 @@ retrieval:
   fusion_direct_weight: 1.0
   fusion_example_vote_weight: 1.0
   fusion_allow_example_failure: true
+  task1_allow_failure: true
 
 embeddings:
   cache_dir: data/outputs/embeddings
